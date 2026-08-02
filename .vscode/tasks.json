@@ -1,0 +1,50 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "skuzic: dev + magenta",
+      "detail": "Runs the Vite dev server and the Magenta RT2 bridge together.",
+      "dependsOrder": "parallel",
+      "dependsOn": ["skuzic: dev", "skuzic: magenta bridge"],
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "skuzic: dev",
+      "detail": "Vite dev server on http://localhost:5173",
+      "type": "shell",
+      "command": "pnpm dev",
+      "options": { "cwd": "${workspaceFolder}" },
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": {
+        "group": "skuzic",
+        "panel": "dedicated",
+        "reveal": "always"
+      }
+    },
+    {
+      "label": "skuzic: magenta bridge",
+      "detail": "Local MRT2 WebSocket bridge on ws://localhost:8765",
+      "type": "shell",
+      "command": "${workspaceFolder}/.venv/bin/python server/magenta_bridge.py --size mrt2_base",
+      "options": { "cwd": "${workspaceFolder}" },
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": {
+        "group": "skuzic",
+        "panel": "dedicated",
+        "reveal": "always"
+      }
+    },
+    {
+      "label": "skuzic: setup magenta",
+      "detail": "One-time: create .venv, install magenta-rt, fetch weights. Idempotent.",
+      "type": "shell",
+      "command": "[ -x .venv/bin/python ] || python3 -m venv .venv && .venv/bin/python -m pip install -q --upgrade pip uv && .venv/bin/uv pip install --python .venv/bin/python 'magenta-rt[mlx]' websockets numpy && .venv/bin/mrt models init && .venv/bin/mrt models download mrt2_base",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": [],
+      "presentation": { "panel": "dedicated", "reveal": "always" }
+    }
+  ]
+}

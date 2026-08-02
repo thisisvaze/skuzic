@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:ai.google.dev)",
+      "Bash(pnpm exec *)",
+      "Bash(pnpm test *)"
+    ]
+  }
+}
