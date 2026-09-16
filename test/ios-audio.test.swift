@@ -268,7 +268,11 @@ private struct AudioTests {
         outbox.enqueue("PLAY")
         outbox.enqueue("prompts-next", key: "prompts")
         outbox.enqueue("RESET")
-        try? await Task.sleep(nanoseconds: 150_000_000)
+        // Poll rather than a fixed sleep: CI VMs stretch 10ms sleeps unpredictably.
+        let deadline = Date().addingTimeInterval(2)
+        while await sent.values.count < 6, Date() < deadline {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
         let recorded = await sent.values
         check(recorded == ["setup", "config-final", "prompts-final", "PLAY", "prompts-next", "RESET"],
               "commands stay ordered while adjacent stale updates coalesce")
