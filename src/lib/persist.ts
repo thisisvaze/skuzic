@@ -7,10 +7,16 @@ export const KEYS = {
   apiKey: 'skuzic_key',
   autoInterpret: 'skuzic_auto_interpret',
   abTest: 'skuzic_ab_test',
-  plannerModel: 'skuzic_planner_model',
-  plannerConfig: 'skuzic_planner_config',
+  backend: 'skuzic_backend',
+  // Versioned for the same reason as `config`: a stored pick from an earlier
+  // build outranks the default forever, so a changed default needs a new key.
+  plannerModel: 'skuzic_planner_model_v2',
+  plannerConfig: 'skuzic_planner_config_v2',
   masterVolume: 'skuzic_master_volume',
   inkColor: 'skuzic_ink_color',
+  brushSize: 'skuzic_brush_size',
+  brushOpacity: 'skuzic_brush_opacity',
+  theme: 'skuzic_theme',
   // Versioned because `load` merges a stored record *over* the defaults, so a
   // saved config from an earlier build silently wins forever. The key, tempo
   // and guidance in INITIAL_CONFIG are the sound of the instrument, not a user

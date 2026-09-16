@@ -14,13 +14,13 @@ import {
  * lite one to fall back to when latency matters more than the arrangement.
  */
 export const PLANNER_MODELS = [
-  { id: 'gemini-3.6-flash', label: 'Flash 3.6 — better plans' },
+  { id: 'gemini-3.8-flash', label: 'Flash 3.8 — better plans' },
   { id: 'gemini-3.5-flash-lite', label: 'Flash Lite 3.5 — fastest' },
 ] as const;
 
 export type PlannerModel = (typeof PLANNER_MODELS)[number]['id'];
 
-export const DEFAULT_PLANNER_MODEL: PlannerModel = 'gemini-3.6-flash';
+export const DEFAULT_PLANNER_MODEL: PlannerModel = 'gemini-3.5-flash-lite';
 
 export function isPlannerModel(value: string): value is PlannerModel {
   return PLANNER_MODELS.some((m) => m.id === value);
@@ -335,7 +335,7 @@ export function createPlanner(apiKey: string, model: PlannerModel = DEFAULT_PLAN
           responseMimeType: 'application/json',
           responseSchema: PLAN_SCHEMA,
           // Latency matters more than depth here — this fires on a button tap.
-          thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
           // A rough sketch only has to read as a *shape*; 64 image tokens is
           // plenty for that and cuts the prefill against MEDIUM's 256.
           mediaResolution: MediaResolution.MEDIA_RESOLUTION_LOW,

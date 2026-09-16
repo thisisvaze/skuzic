@@ -4,11 +4,11 @@ import {
   useImperativeHandle,
   useRef,
   useState,
-  type ReactNode,
 } from 'react';
-import { Eraser, Loader2, Play, Redo2, Trash2, Undo2 } from 'lucide-react';
+import { Droplet, Eraser, Loader2, Play, Redo2, Trash2, Undo2 } from 'lucide-react';
 import getStroke from 'perfect-freehand';
 import { Button } from '@/components/ui/button';
+import { Slider } from '@/components/ui/slider';
 import { cn } from '@/lib/utils';
 import { KEYS, load, save } from '@/lib/persist';
 
@@ -35,10 +35,21 @@ const COLORS = [
 ];
 
 /**
- * One pencil, no size picker — width comes from stylus pressure, or from
- * velocity when there is none, which is what makes a stroke read as drawn
- * rather than plotted. Tuned for sketching: quick strokes taper, slow ones
- * press dark.
+ * Nib range, Procreate-style: one continuous slider from a hairline to a
+ * marker. Pressure/velocity still shapes each stroke; this only scales it.
+ */
+const SIZE_MIN = 1;
+const SIZE_MAX = 40;
+/** The preview dot must fit its cell however big the nib gets. */
+const SIZE_DOT_MAX = 18;
+
+/** Floor, not zero: a fully transparent nib is a broken tool, not a light one. */
+const OPACITY_MIN = 0.1;
+
+/**
+ * Width comes from stylus pressure, or from velocity when there is none, which
+ * is what makes a stroke read as drawn rather than plotted. Tuned for
+ * sketching: quick strokes taper, slow ones press dark.
  */
 const PENCIL = {
   size: 5,
@@ -160,6 +171,9 @@ interface Stroke {
   points: number[][];
   color: string;
   size: number;
+  /** 0-1 nib opacity, multiplied into INK_ALPHA. Per stroke, so replaying the
+   *  history after an undo keeps each mark as light as it was drawn. */
+  alpha: number;
   erasing: boolean;
   /**
    * perfect-freehand *ignores* the supplied pressure when this is on, deriving
@@ -290,8 +304,6 @@ interface Props {
   onStart?: () => void;
   startDisabled?: boolean;
   startTitle?: string;
-  /** Extra controls under the start button (e.g. backend picker). */
-  startExtras?: ReactNode;
 }
 
 /**
@@ -312,7 +324,6 @@ export const DrawCanvas = forwardRef<CanvasHandle, Props>(function DrawCanvas(
     onStart,
     startDisabled,
     startTitle,
-    startExtras,
   },
   ref,
 ) {
@@ -325,6 +336,14 @@ export const DrawCanvas = forwardRef<CanvasHandle, Props>(function DrawCanvas(
     save(KEYS.inkColor, color);
   }, [color]);
   const [erasing, setErasing] = useState(false);
+  const [brushSize, setBrushSize] = useState(() => load(KEYS.brushSize, PENCIL.size));
+  useEffect(() => {
+    save(KEYS.brushSize, brushSize);
+  }, [brushSize]);
+  const [brushOpacity, setBrushOpacity] = useState(() => load(KEYS.brushOpacity, 1));
+  useEffect(() => {
+    save(KEYS.brushOpacity, brushOpacity);
+  }, [brushOpacity]);
 
   const past = useRef<Entry[]>([]);
   const future = useRef<Entry[]>([]);
@@ -367,7 +386,7 @@ export const DrawCanvas = forwardRef<CanvasHandle, Props>(function DrawCanvas(
     const sctx = scratch?.getContext('2d');
     const grain = grainRef.current;
     if (!scratch || !sctx || !grain) {
-      ctx.globalAlpha = INK_ALPHA;
+      ctx.globalAlpha = INK_ALPHA * s.alpha;
       ctx.fillStyle = s.color;
       ctx.fill(path);
       ctx.globalAlpha = 1;
@@ -416,7 +435,7 @@ export const DrawCanvas = forwardRef<CanvasHandle, Props>(function DrawCanvas(
     sctx.globalCompositeOperation = 'source-over';
     sctx.restore();
 
-    ctx.globalAlpha = INK_ALPHA;
+    ctx.globalAlpha = INK_ALPHA * s.alpha;
     ctx.drawImage(scratch, bx * dpr, by * dpr, bw * dpr, bh * dpr, bx, by, bw, bh);
     ctx.globalAlpha = 1;
   };
@@ -489,26 +508,42 @@ export const DrawCanvas = forwardRef<CanvasHandle, Props>(function DrawCanvas(
     repaint();
   };
 
-  useEffect(() => {
+  /** Clearing from the toolbar also has to tell the planner the page is blank. */
+  const clearFromToolbar = () => {
+    const hadInk = dirty.current;
+    clearPad();
+    if (hadInk && canAutoInterpret()) {
+      (onClearInterpret ?? onAutoInterpret ?? onInterpret)?.();
+    }
+  };
+
+  /**
+   * Size the backing store to the element's *current* box. Assigning width or
+   * height resets the 2D context, so every transform has to be reapplied here.
+   */
+  const resizeSurfaces = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
+    const w = Math.max(1, Math.round(rect.width * dpr));
+    const h = Math.max(1, Math.round(rect.height * dpr));
+    if (canvas.width === w && canvas.height === h && dprRef.current === dpr) return;
+
     dprRef.current = dpr;
-    canvas.width = rect.width * dpr;
-    canvas.height = rect.height * dpr;
-    const ctx = canvas.getContext('2d');
-    if (ctx) ctx.scale(dpr, dpr);
+    canvas.width = w;
+    canvas.height = h;
+    canvas.getContext('2d')?.scale(dpr, dpr);
 
     const base = document.createElement('canvas');
-    base.width = canvas.width;
-    base.height = canvas.height;
+    base.width = w;
+    base.height = h;
     base.getContext('2d')?.scale(dpr, dpr);
     baseRef.current = base;
 
     const scratch = document.createElement('canvas');
-    scratch.width = canvas.width;
-    scratch.height = canvas.height;
+    scratch.width = w;
+    scratch.height = h;
     const sctx = scratch.getContext('2d');
     sctx?.scale(dpr, dpr);
     scratchRef.current = scratch;
@@ -516,6 +551,42 @@ export const DrawCanvas = forwardRef<CanvasHandle, Props>(function DrawCanvas(
 
     fill();
     redrawBase();
+    present();
+  };
+
+  /**
+   * Without this the backing store keeps its mount-time pixel size while the
+   * CSS box follows the window, and the browser stretches one to the other —
+   * the drawing scales and every stroke changes apparent width. Re-sizing and
+   * replaying the stroke history instead keeps marks at the size they were
+   * drawn; a wider window reveals more paper rather than magnifying the page.
+   *
+   * ponytail: only observes layout, so dragging the window to a monitor with a
+   * different devicePixelRatio at identical CSS size won't re-render until the
+   * next resize. Add a resolution matchMedia listener if that ever shows up.
+   */
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    resizeSurfaces();
+
+    // A drag fires this every frame, and each pass replays the whole history —
+    // coalescing to one rebuild per frame is what keeps that affordable.
+    let frame = 0;
+    const observer = new ResizeObserver(() => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        resizeSurfaces();
+      });
+    });
+    observer.observe(canvas);
+    return () => {
+      observer.disconnect();
+      if (frame) cancelAnimationFrame(frame);
+    };
+    // Mount only: the callbacks it uses read through refs, never through props.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useImperativeHandle(ref, () => ({
@@ -571,7 +642,8 @@ export const DrawCanvas = forwardRef<CanvasHandle, Props>(function DrawCanvas(
     stroke.current = {
       points: [[x, y, pressure]],
       color,
-      size: erasing ? PENCIL.size * ERASER_SCALE : PENCIL.size,
+      size: erasing ? brushSize * ERASER_SCALE : brushSize,
+      alpha: brushOpacity,
       erasing,
       simulate: e.pointerType !== 'pen',
     };
@@ -651,7 +723,7 @@ export const DrawCanvas = forwardRef<CanvasHandle, Props>(function DrawCanvas(
         <canvas
           ref={canvasRef}
           className={cn(
-            'block h-[28rem] w-full touch-none transition-opacity duration-300',
+            'block h-[28rem] w-full touch-none transition-opacity duration-300 xl:h-[36rem]',
             showStart ? 'cursor-default opacity-40' : 'cursor-crosshair',
           )}
           onPointerDown={showStart ? undefined : down}
@@ -678,27 +750,7 @@ export const DrawCanvas = forwardRef<CanvasHandle, Props>(function DrawCanvas(
             >
               <Play className="translate-x-0.5" />
             </Button>
-            {startExtras}
           </div>
-        )}
-        {!showStart && (
-          <Button
-            type="button"
-            size="icon"
-            variant="default"
-            aria-label="clear drawing"
-            title="clear"
-            className="absolute top-3 right-3 size-10 shadow-md"
-            onClick={() => {
-              const hadInk = dirty.current;
-              clearPad();
-              if (hadInk && canAutoInterpret()) {
-                (onClearInterpret ?? onAutoInterpret ?? onInterpret)?.();
-              }
-            }}
-          >
-            <Trash2 className="size-4" />
-          </Button>
         )}
         {onInterpret && !showStart && (
           <Button
@@ -741,6 +793,53 @@ export const DrawCanvas = forwardRef<CanvasHandle, Props>(function DrawCanvas(
             ))}
           </div>
 
+          <div className="flex items-center gap-2 text-muted-foreground">
+            <span
+              className="grid size-5 shrink-0 place-items-center"
+              aria-hidden="true"
+              title={`brush ${brushSize}px`}
+            >
+              <span
+                className="rounded-full bg-current"
+                style={{
+                  width: Math.max(3, (brushSize / SIZE_MAX) * SIZE_DOT_MAX),
+                  height: Math.max(3, (brushSize / SIZE_MAX) * SIZE_DOT_MAX),
+                  opacity: brushOpacity,
+                }}
+              />
+            </span>
+            <Slider
+              className="w-24"
+              value={[brushSize]}
+              min={SIZE_MIN}
+              max={SIZE_MAX}
+              step={1}
+              aria-label="brush size"
+              title={`brush ${brushSize}px`}
+              onValueChange={([v]) => setBrushSize(v)}
+            />
+          </div>
+
+          <div className="flex items-center gap-2 text-muted-foreground">
+            <span
+              className="grid size-5 shrink-0 place-items-center"
+              aria-hidden="true"
+              title={`opacity ${Math.round(brushOpacity * 100)}%`}
+            >
+              <Droplet className="size-4" style={{ opacity: 0.35 + brushOpacity * 0.65 }} />
+            </span>
+            <Slider
+              className="w-24"
+              value={[brushOpacity * 100]}
+              min={OPACITY_MIN * 100}
+              max={100}
+              step={1}
+              aria-label="brush opacity"
+              title={`opacity ${Math.round(brushOpacity * 100)}%`}
+              onValueChange={([v]) => setBrushOpacity(v / 100)}
+            />
+          </div>
+
           <div className="flex items-center gap-0.5">
             <button
               type="button"
@@ -774,6 +873,20 @@ export const DrawCanvas = forwardRef<CanvasHandle, Props>(function DrawCanvas(
               className={cn(TOOL_CELL, TOOL_OFF, 'disabled:pointer-events-none disabled:opacity-35')}
             >
               <Redo2 className="size-4" />
+            </button>
+            <button
+              type="button"
+              aria-label="clear drawing"
+              title="clear"
+              disabled={!hasInk}
+              onClick={clearFromToolbar}
+              className={cn(
+                TOOL_CELL,
+                TOOL_OFF,
+                'hover:text-destructive disabled:pointer-events-none disabled:opacity-35',
+              )}
+            >
+              <Trash2 className="size-4" />
             </button>
           </div>
         </div>

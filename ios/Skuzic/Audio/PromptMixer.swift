@@ -15,6 +15,10 @@ final class PromptMixer {
     static let epsilon = 0.005
     private let rampSeconds = 1.0
     private let tickSeconds = 0.1
+    // Match the web mixer: sending a full prompt replacement every 100ms can
+    // stall generation. Keep interpolating, but send roughly every 300ms.
+    private let sendEveryTicks = 3
+    private var tickCount = 0
 
     private var current: [String: Double] = [:]
     private var target: [String: Double] = [:]
@@ -32,7 +36,7 @@ final class PromptMixer {
         var merged: [String: Double] = [:]
         for prompt in prompts {
             guard !prompt.text.trimmingCharacters(in: .whitespaces).isEmpty,
-                  prompt.weight > 0
+                  prompt.weight.isFinite, prompt.weight > 0
             else { continue }
             merged[prompt.text, default: 0] += prompt.weight
         }
@@ -41,7 +45,18 @@ final class PromptMixer {
         // rather than letting the backend truncate arbitrarily.
         let capped = merged.sorted { $0.value > $1.value }.prefix(maxPrompts)
 
-        target = Dictionary(uniqueKeysWithValues: capped.map { ($0.key, $0.value) })
+        let nextTarget = Dictionary(uniqueKeysWithValues: capped.map { ($0.key, $0.value) })
+        guard nextTarget != target else { return }
+        target = nextTarget
+        // A first prompt must be on the wire before PLAY. Crossfading from
+        // silence only delays setup; subsequent changes still use the ramp.
+        if current.isEmpty {
+            current = target
+            if !capped.isEmpty {
+                send(capped.map { PromptWeight(text: $0.key, weight: $0.value) })
+            }
+            return
+        }
         for (key, _) in capped where current[key] == nil {
             current[key] = Self.epsilon
         }
@@ -51,13 +66,16 @@ final class PromptMixer {
 
     private func start() {
         guard timer == nil else { return }
+        tickCount = 0
         let step = tickSeconds / rampSeconds
 
-        timer = Timer.scheduledTimer(withTimeInterval: tickSeconds, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: tickSeconds, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.tick(step: step)
             }
         }
+        self.timer = timer
+        RunLoop.main.add(timer, forMode: .common)
     }
 
     private func tick(step: Double) {
@@ -81,10 +99,15 @@ final class PromptMixer {
 
         let prompts = current
             .filter { $0.value > Self.epsilon }
+            .sorted { $0.value > $1.value }
+            .prefix(maxPrompts)
             .map { PromptWeight(text: $0.key, weight: $0.value) }
 
+        // Always send the settled frame so the exact target is never lost.
+        let due = settled || tickCount % sendEveryTicks == 0
+        tickCount += 1
         // An empty list is invalid; hold the last mix instead.
-        if !prompts.isEmpty { send(prompts) }
+        if due, !prompts.isEmpty { send(prompts) }
 
         if settled { stop() }
     }

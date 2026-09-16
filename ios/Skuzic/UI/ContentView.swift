@@ -16,6 +16,8 @@ struct ContentView: View {
     @State private var panelCollapsed = false
     @State private var toast: LogEntry?
     @State private var toastDismiss: Task<Void, Never>?
+    @State private var autoInterpretTask: Task<Void, Never>?
+    @State private var autoInterpretPending = false
 
     var body: some View {
         ZStack {
@@ -86,6 +88,7 @@ struct ContentView: View {
         .animation(.snappy(duration: 0.22), value: panel)
         .animation(.snappy(duration: 0.28), value: toast?.id)
         .task {
+            canvas.onStrokeBegin = { cancelAutoInterpret(clearPending: false) }
             canvas.onStrokeEnd = {
                 store.noteCanvasHasInk(canvas.hasInk)
                 interpretIfAuto()
@@ -102,11 +105,28 @@ struct ContentView: View {
         }
         .onChange(of: canvas.hasInk) { _, hasInk in
             store.noteCanvasHasInk(hasInk)
-            if hasInk { interpretIfAuto() }
+            if hasInk { interpretIfAuto() } else { cancelAutoInterpret() }
+        }
+        .onChange(of: store.thinking) { _, thinking in
+            // Strokes made during a request must still update the final mix.
+            if !thinking, autoInterpretPending { interpretIfAuto() }
+        }
+        .onChange(of: store.autoInterpret) { _, enabled in
+            if enabled { interpretIfAuto() } else { cancelAutoInterpret() }
         }
         .onChange(of: scenePhase) { _, phase in
             // Backgrounding can be followed by termination, so commit to disk.
-            if phase == .background { persist() }
+            if phase == .background {
+                cancelAutoInterpret(clearPending: false)
+                persist()
+            } else if phase == .active, autoInterpretPending {
+                interpretIfAuto()
+            }
+        }
+        .onDisappear {
+            cancelAutoInterpret()
+            canvas.onStrokeBegin = nil
+            canvas.onStrokeEnd = nil
         }
         .onChange(of: store.log.first?.id) { _, _ in
             guard let latest = store.log.first else { return }
@@ -126,8 +146,16 @@ struct ContentView: View {
     // MARK: - Actions
 
     private func interpret() async {
-        guard canvas.hasInk else { return }
-        await store.trigger("Recognized Input Update", drawing: canvas.exportJPEG())
+        cancelAutoInterpret()
+        guard canvas.hasInk, !canvas.isDrawing, !store.thinking, store.connected else { return }
+        let exportStarted = Diagnostics.now
+        Diagnostics.event(.drawing, "EXPORT_BEGIN buffer_s=\(String(format: "%.3f", store.buffered))")
+        guard let drawing = canvas.exportJPEG() else {
+            Diagnostics.event(.drawing, "EXPORT_FAILED")
+            return
+        }
+        Diagnostics.event(.drawing, "EXPORT_END elapsed_ms=\(Diagnostics.milliseconds(since: exportStarted)) bytes=\(drawing.count)")
+        await store.trigger("Recognized Input Update", drawing: drawing)
     }
 
     private func persist() {
@@ -140,14 +168,34 @@ struct ContentView: View {
     }
 
     private func close() {
+        cancelAutoInterpret()
         persist()
         store.endSession()
         onClose()
     }
 
     private func interpretIfAuto() {
-        guard store.autoInterpret, store.connected, !store.thinking, canvas.hasInk else { return }
-        Task { await interpret() }
+        guard store.autoInterpret, store.connected, canvas.hasInk, scenePhase == .active else { return }
+        autoInterpretPending = true
+        cancelAutoInterpret(clearPending: false)
+        guard !canvas.isDrawing else { return }
+
+        // Wait for a pause in drawing before rendering/uploading the canvas.
+        // Beginning another stroke cancels this wait, including long strokes.
+        autoInterpretTask = Task { @MainActor in
+            do { try await Task.sleep(nanoseconds: 800_000_000) }
+            catch { return }
+            guard !Task.isCancelled else { return }
+            autoInterpretTask = nil
+            guard !store.thinking else { return }
+            await interpret()
+        }
+    }
+
+    private func cancelAutoInterpret(clearPending: Bool = true) {
+        autoInterpretTask?.cancel()
+        autoInterpretTask = nil
+        if clearPending { autoInterpretPending = false }
     }
 }
 
@@ -267,6 +315,9 @@ private struct TransportBar: View {
 
     private var statusText: String {
         if !store.hasKey { return "no api key" }
+        if store.status == .buffering, !store.statusDetail.isEmpty {
+            return store.statusDetail
+        }
         if store.connected {
             return "\(store.status.rawValue) · \(String(format: "%.1f", store.buffered))s"
         }
@@ -279,7 +330,7 @@ private struct TransportBar: View {
     private var dotColor: Color {
         switch store.status {
         case .playing: return Color(hex: 0x4ADE9B)
-        case .connecting: return Color(hex: 0xE8C468)
+        case .connecting, .buffering: return Color(hex: 0xE8C468)
         case .error: return Color(hex: 0xE8705F)
         case .ready, .paused: return .white.opacity(0.6)
         case .idle: return .white.opacity(0.3)

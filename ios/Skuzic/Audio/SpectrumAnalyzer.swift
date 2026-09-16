@@ -22,7 +22,12 @@ final class SpectrumAnalyzer {
     private let sampleRate: Float
 
     private let lock = NSLock()
+    private let workLock = NSLock()
     private var magnitudes: [Float]
+    private var windowed = [Float](repeating: 0, count: frameCount)
+    private var real = [Float](repeating: 0, count: frameCount / 2)
+    private var imag = [Float](repeating: 0, count: frameCount / 2)
+    private var output = [Float](repeating: 0, count: frameCount / 2)
 
     init(sampleRate: Double) {
         self.sampleRate = Float(sampleRate)
@@ -42,14 +47,12 @@ final class SpectrumAnalyzer {
         guard let fft, let channel = buffer.floatChannelData?[0],
               Int(buffer.frameLength) >= Self.frameCount
         else { return }
+        guard workLock.try() else { return }
+        defer { workLock.unlock() }
 
-        var windowed = [Float](repeating: 0, count: Self.frameCount)
         vDSP_vmul(channel, 1, window, 1, &windowed, 1, vDSP_Length(Self.frameCount))
 
         let half = Self.frameCount / 2
-        var real = [Float](repeating: 0, count: half)
-        var imag = [Float](repeating: 0, count: half)
-        var output = [Float](repeating: 0, count: half)
 
         real.withUnsafeMutableBufferPointer { realPtr in
             imag.withUnsafeMutableBufferPointer { imagPtr in
@@ -68,11 +71,10 @@ final class SpectrumAnalyzer {
 
         // vDSP's real FFT returns twice the true magnitude.
         var scale = Float(1) / Float(Self.frameCount)
-        vDSP_vsmul(output, 1, &scale, &output, 1, vDSP_Length(half))
-
-        lock.lock()
-        magnitudes = output
-        lock.unlock()
+        // Meter contention drops a visual update; it never stalls audio.
+        guard lock.try() else { return }
+        defer { lock.unlock() }
+        vDSP_vsmul(output, 1, &scale, &magnitudes, 1, vDSP_Length(half))
     }
 
     /// Band energies 0..1, low to high.
@@ -83,8 +85,8 @@ final class SpectrumAnalyzer {
     /// visible instead of averaging them away.
     func levels(bands: Int) -> [Float] {
         lock.lock()
-        let mags = magnitudes
-        lock.unlock()
+        defer { lock.unlock() }
+        return magnitudes.withUnsafeBufferPointer { mags in
 
         guard !mags.isEmpty, bands > 0 else { return [Float](repeating: 0, count: max(0, bands)) }
 
@@ -104,6 +106,7 @@ final class SpectrumAnalyzer {
             // almost its whole range on the top few dB.
             let db = 20 * log10(max(peak, 1e-7))
             return min(1, max(0, (db - Self.floorDb) / -Self.floorDb))
+        }
         }
     }
 }

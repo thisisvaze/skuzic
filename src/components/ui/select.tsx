@@ -51,10 +51,13 @@ function SelectContent({
         )}
         {...props}
       >
+        {/* Width tracks the trigger, height must not: pinning the viewport to
+            the trigger's height clips the list to one row and spills the rest
+            outside the popover, where clicks land on whatever is underneath. */}
         <SelectPrimitive.Viewport
           className={cn(
             'p-0',
-            position === 'popper' && 'h-[var(--radix-select-trigger-height)] w-full min-w-[var(--radix-select-trigger-width)]',
+            position === 'popper' && 'w-full min-w-[var(--radix-select-trigger-width)]',
           )}
         >
           {children}

@@ -20,6 +20,7 @@ final class SkuzicStore: ObservableObject {
     @Published private(set) var status: EngineStatus = .idle
     @Published private(set) var statusDetail = ""
     @Published private(set) var buffered: Double = 0
+    @Published private(set) var playbackRequested = false
 
     @Published var masterVolume: Float = Float(Preferences.double(.masterVolume, or: 0.8)) {
         didSet {
@@ -54,22 +55,24 @@ final class SkuzicStore: ObservableObject {
     private var logSeq = 0
     private var hasPlayed = false
     private var resumeOnReturn = false
+    private var sessionID = UUID()
+    private var planSeq = 0
 
     /// Pad ink — playback must not start while this is false (blank canvas).
     private(set) var canvasHasInk = false
 
     var connected: Bool { status != .idle && status != .error }
-    var playing: Bool { status == .playing }
-    /// `playing` flips the instant the command is sent, but Lyria still has to
-    /// generate and stream a first chunk. Gate the meter on audio actually
-    /// being queued, or it moves over several seconds of silence.
-    var audible: Bool { playing && buffered > 0 }
+    var playing: Bool { playbackRequested }
+    /// The pause button follows user intent while buffering. The visualizer
+    /// follows the player's actual state.
+    var audible: Bool { status == .playing && buffered > 0 }
 
     /// Band energies for the equalizer meter.
     func levels(bands: Int) -> [Float]? { engine.levels(bands: bands) }
     var hasKey: Bool { !Secrets.geminiAPIKey.isEmpty }
 
     init(apiKey: String) {
+        Diagnostics.event(.session, "DIAGNOSTICS_READY version=2 health_interval_s=2")
         let model = Preferences.string(.plannerModel).flatMap(PlannerModel.init(rawValue:))
             ?? .default
         let config = Preferences.string(.plannerConfig).flatMap(PlannerConfig.init(rawValue:))
@@ -85,6 +88,7 @@ final class SkuzicStore: ObservableObject {
         engine.$status.assign(to: &$status)
         engine.$statusDetail.assign(to: &$statusDetail)
         engine.$bufferedSeconds.assign(to: &$buffered)
+        engine.$playbackRequested.assign(to: &$playbackRequested)
 
         engine.onFilteredPrompt = { [weak self] text, reason in
             self?.push(LogEntry(id: 0, event: "prompt filtered", error: "“\(text)” — \(reason)"))
@@ -126,10 +130,9 @@ final class SkuzicStore: ObservableObject {
         }
 
         do {
+            engine.setConfig(state.config)
             try await engine.connect()
             engine.setMasterVolume(masterVolume)
-
-            engine.setConfig(state.config)
 
             // Connect always — even on a blank new sketch — so later drawing can
             // interpret and play without another manual Start tap. Audio itself
@@ -148,6 +151,7 @@ final class SkuzicStore: ObservableObject {
     }
 
     func stop() {
+        sessionID = UUID()
         hasPlayed = false
         resumeOnReturn = false
         engine.close()
@@ -164,12 +168,14 @@ final class SkuzicStore: ObservableObject {
     /// Generation is only wanted while the app is on screen. Pausing the session
     /// rather than just muting also stops Lyria generating audio nobody hears.
     func suspendForBackground() {
+        Diagnostics.event(.session, "APP_BACKGROUND playing=\(playing)")
         guard playing else { return }
         resumeOnReturn = true
         engine.pause()
     }
 
     func resumeIfSuspended() {
+        Diagnostics.event(.session, "APP_ACTIVE resume_pending=\(resumeOnReturn)")
         guard resumeOnReturn, canvasHasInk else { return }
         resumeOnReturn = false
         engine.play()
@@ -183,14 +189,28 @@ final class SkuzicStore: ObservableObject {
 
         thinking = true
         defer { thinking = false }
+        let requestSession = sessionID
+        planSeq += 1
+        let requestID = planSeq
+        let startedAt = Diagnostics.now
+        Diagnostics.event(.planner, "PLAN_BEGIN id=\(requestID) drawing_bytes=\(drawing?.count ?? 0) tracks=\(state.tracks.count) buffer_s=\(String(format: "%.3f", buffered))")
 
         do {
             let plan = try await planner.plan(event: trimmed, state: state, drawing: drawing)
-            dispatch(plan.actions)
+            guard requestSession == sessionID, connected, !Task.isCancelled else {
+                Diagnostics.event(.planner, "PLAN_DISCARDED id=\(requestID) session_changed_or_cancelled=true")
+                return
+            }
+            let actions = drawing == nil ? plan.actions : plan.actions.compactMap(\.preservingPlayback)
+            let sanitized = drawing == nil ? 0 : plan.actions.filter { $0.preservingPlayback != $0 }.count
+            dispatch(actions)
+            Diagnostics.event(.planner, "PLAN_APPLIED id=\(requestID) elapsed_ms=\(Diagnostics.milliseconds(since: startedAt)) actions=\(actions.count) restart_actions_sanitized=\(sanitized) tracks=\(state.tracks.count)")
             push(
                 LogEntry(
-                    id: 0, event: trimmed, reasoning: plan.reasoning, actions: plan.actions))
+                    id: 0, event: trimmed, reasoning: plan.reasoning, actions: actions))
         } catch {
+            guard requestSession == sessionID, !Task.isCancelled else { return }
+            Diagnostics.failure(.planner, "PLAN_FAILED id=\(requestID) elapsed_ms=\(Diagnostics.milliseconds(since: startedAt))", error)
             push(LogEntry(id: 0, event: trimmed, error: error.localizedDescription))
         }
     }
@@ -216,14 +236,13 @@ final class SkuzicStore: ObservableObject {
         if state.config != previous.config {
             Preferences.encode(state.config, .lastConfig)
             engine.setConfig(state.config)
-            // Only tempo and key force a restart; the rest apply in place.
-            if state.config.bpm != previous.config.bpm
-                || state.config.scale != previous.config.scale {
-                engine.resetContext()
-            }
         }
 
-        if state.contextEpoch != previous.contextEpoch {
+        // One reset per batch, even if both the config and epoch changed.
+        if state.config.bpm != previous.config.bpm
+            || state.config.scale != previous.config.scale
+            || state.contextEpoch != previous.contextEpoch {
+            Diagnostics.event(.session, "RESET_REASON tempo_changed=\(state.config.bpm != previous.config.bpm) key_changed=\(state.config.scale != previous.config.scale) explicit_reset=\(state.contextEpoch != previous.contextEpoch)")
             engine.resetContext()
         }
     }

@@ -1,3 +1,5 @@
+import { ChevronRight } from 'lucide-react';
+
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import type { Action } from '../core/types';
@@ -63,11 +65,76 @@ function summarize(action: Action): string {
   }
 }
 
+/**
+ * Each pass is read → reason → act, and only the last of those three is worth
+ * a permanent line: it is what the mix actually did. The reasoning is the long
+ * part and the timings are for debugging, so both live behind the disclosure.
+ * `<details>` rather than state — the open/closed bit belongs to one row and
+ * nothing else in the app reads it.
+ */
+function Row({ entry }: { entry: LogEntry }) {
+  // An error has no plan to unfold; showing a twisty that reveals nothing is
+  // worse than no twisty.
+  if (entry.error) {
+    return (
+      <div className="rounded-2xl bg-card px-4 py-3">
+        <div className="text-[13px] text-destructive">{entry.event}</div>
+        <p className="mt-1 text-sm text-destructive">{entry.error}</p>
+      </div>
+    );
+  }
+
+  const detail = entry.reasoning || entry.timings;
+
+  return (
+    <details className="group rounded-2xl bg-card [&[open]]:pb-3">
+      <summary
+        className={cn(
+          'flex list-none items-start gap-2 rounded-2xl px-4 py-3 outline-none',
+          'transition-colors focus-visible:ring-2 focus-visible:ring-ring/60',
+          detail ? 'cursor-pointer hover:bg-accent/40' : 'cursor-default',
+        )}
+      >
+        <ChevronRight
+          className={cn(
+            'mt-0.5 size-3.5 shrink-0 text-muted-foreground transition-transform',
+            'group-open:rotate-90',
+            !detail && 'invisible',
+          )}
+        />
+        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+          {entry.actions?.length ? (
+            <div className="flex flex-wrap gap-1.5">
+              {entry.actions.map((action, i) => (
+                <Badge key={i}>{summarize(action)}</Badge>
+              ))}
+            </div>
+          ) : (
+            <span className="text-[13px] text-muted-foreground">no change</span>
+          )}
+          <span className="truncate text-[12px] text-muted-foreground/60">{entry.event}</span>
+        </div>
+      </summary>
+
+      {detail && (
+        <div className="pr-4 pl-[2.375rem]">
+          {entry.reasoning && <p className="text-sm">{entry.reasoning}</p>}
+          {entry.timings && (
+            <div className="mt-2 font-mono text-[11px] text-muted-foreground/60">
+              {summarizeTimings(entry.timings)}
+            </div>
+          )}
+        </div>
+      )}
+    </details>
+  );
+}
+
 export function ActionLog({ entries }: { entries: LogEntry[] }) {
   if (!entries.length) {
     return (
       <p className="rounded-2xl bg-card px-4 py-5 text-sm text-muted-foreground">
-        Actions the planner takes will appear here.
+        Each pass the planner makes will appear here.
       </p>
     );
   }
@@ -75,34 +142,7 @@ export function ActionLog({ entries }: { entries: LogEntry[] }) {
   return (
     <div className="scrollbar-thin flex max-h-[28rem] flex-col gap-1 overflow-y-auto">
       {entries.map((entry) => (
-        <div key={entry.id} className="rounded-2xl bg-card px-4 py-3">
-          <div
-            className={cn('text-[13px] text-muted-foreground', entry.error && 'text-destructive')}
-          >
-            {entry.event}
-          </div>
-
-          {entry.error ? (
-            <p className="mt-1 text-sm text-destructive">{entry.error}</p>
-          ) : (
-            <>
-              {entry.reasoning && <p className="mt-1 text-sm">{entry.reasoning}</p>}
-              {!!entry.actions?.length && (
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  {entry.actions.map((action, i) => (
-                    <Badge key={i}>{summarize(action)}</Badge>
-                  ))}
-                </div>
-              )}
-            </>
-          )}
-
-          {entry.timings && (
-            <div className="mt-2 font-mono text-[11px] text-muted-foreground/60">
-              {summarizeTimings(entry.timings)}
-            </div>
-          )}
-        </div>
+        <Row key={entry.id} entry={entry} />
       ))}
     </div>
   );

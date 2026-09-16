@@ -14,3 +14,9 @@ ios/build/
 ios/DerivedData/
 *.xcuserdatad
 dist-test/
+.logs/
+
+# personal A/B preference exports (contain drawings)
+dataset/
+tsconfig.tsbuildinfo
+.claude/settings.local.json

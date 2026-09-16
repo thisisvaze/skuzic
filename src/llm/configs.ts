@@ -7,7 +7,7 @@
  * enough to give the instrument a different personality.
  */
 
-export type PlannerConfigId = 'vibe1' | 'realvibe' | 'sounds' | 'continuity';
+export type PlannerConfigId = 'sparse' | 'vibe1' | 'realvibe' | 'sounds' | 'continuity';
 
 export interface PlannerConfig {
   id: PlannerConfigId;
@@ -16,6 +16,48 @@ export interface PlannerConfig {
   description: string;
   strategy: string;
 }
+
+const SPARSE: PlannerConfig = {
+  id: 'sparse',
+  label: 'Sparse v1',
+  description: 'Starts near silence and grows only as the page earns it.',
+  strategy: `STRATEGY — earn every sound
+
+This deliberately overrides the core instruction wherever they conflict,
+especially on how much to play. The default failure of this instrument is
+answering a first shy mark with a finished band. This arranger's job is to make
+the music *start* almost silent and stay behind the drawing at every step —
+the page leads, the music follows.
+
+Scale strictly with how much ink is actually on the canvas:
+
+  one line, one small mark        1 track — a single quiet voice, nothing under
+                                  it, density at or below 0.2
+  a recognisable subject          2 tracks — floor and voice, density ~0.3
+  half a page of drawing          2-3 tracks
+  a full, worked page             3 tracks, and only a full page gets a third
+
+One mark gets ONE track. Yes, the core rules call a lone prompt "a sound rather
+than music" — here that is the point. A single fingerpicked figure or one soft
+chord loop, alone in a room, is an invitation; a rhythm section behind someone's
+first line is an ambush.
+
+The second track is the FOUNDATION, and it enters solid. Listeners keep
+choosing a bass-led bed over a chord-led one, and a bass that carries (volume
+0.5-0.6) over the same bass as a whisper (0.4). Restraint means few tracks,
+never a timid floor: when the bass arrives, let it be felt, and put chords
+above it rather than instead of it.
+
+When you add anything else, add the *quietest* useful thing, not the most
+complete. Prefer MODIFY_TRACK to ADD_TRACK; prefer raising density a notch to
+either. Never emit more than one ADD_TRACK per reply. If the drawing loses
+weight — erased, simplified — take tracks away just as readily.
+
+Keep every prompt small in its own words: "solo", "just", "sparse", "one
+hand", "far away". A prompt that describes a section, a groove, or "the full
+band" has already failed this strategy. Percussion enters last, if ever —
+not before the page is half full.`,
+};
 
 const VIBE1: PlannerConfig = {
   id: 'vibe1',
@@ -174,12 +216,13 @@ from= belongs to a scene the user has moved on from are the first to cut.`,
 };
 
 export const PLANNER_CONFIGS: Record<PlannerConfigId, PlannerConfig> = {
+  sparse: SPARSE,
   vibe1: VIBE1,
   realvibe: REALVIBE,
   sounds: SOUNDS,
   continuity: CONTINUITY,
 };
 
-export const PLANNER_CONFIG_LIST: PlannerConfig[] = [VIBE1, REALVIBE, SOUNDS, CONTINUITY];
+export const PLANNER_CONFIG_LIST: PlannerConfig[] = [SPARSE, VIBE1, REALVIBE, SOUNDS, CONTINUITY];
 
 export const DEFAULT_PLANNER_CONFIG: PlannerConfigId = 'vibe1';

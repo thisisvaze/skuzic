@@ -18,6 +18,8 @@ interface Props {
   baseConfig: MixConfig;
   /** Which variant the engine is currently playing. */
   audition: number;
+  /** B's second stream is still connecting; switching to it would be silent. */
+  warming?: boolean;
   onAudition: (index: number) => void;
   onChoose: (index: number) => void;
   onDismiss: () => void;
@@ -40,7 +42,15 @@ function configDelta(next: MixConfig, base: MixConfig): string[] {
  * keep one. Which strategy produced which stays hidden until after the choice
  * (it lands in the action log), so the ear decides rather than the label.
  */
-export function AbChoice({ variants, baseConfig, audition, onAudition, onChoose, onDismiss }: Props) {
+export function AbChoice({
+  variants,
+  baseConfig,
+  audition,
+  warming = false,
+  onAudition,
+  onChoose,
+  onDismiss,
+}: Props) {
   return (
     <section>
       <div className="mb-2.5 flex items-center gap-2 text-[13px] text-muted-foreground">
@@ -73,8 +83,13 @@ export function AbChoice({ variants, baseConfig, audition, onAudition, onChoose,
                 <span className="font-semibold">{i === 0 ? 'A' : 'B'}</span>
                 {playing && <span className="text-[12px] text-live">playing</span>}
                 <div className="flex-1" />
-                <Button variant="ghost" size="sm" disabled={playing} onClick={() => onAudition(i)}>
-                  listen
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={playing || (i === 1 && warming)}
+                  onClick={() => onAudition(i)}
+                >
+                  {i === 1 && warming ? 'warming…' : 'listen'}
                 </Button>
                 <Button variant="secondary" size="sm" onClick={() => onChoose(i)}>
                   keep

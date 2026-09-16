@@ -11,7 +11,7 @@ which streams music that changes under your hands — no restarts, no clip
 stitching.
 
 ```
-event ──▶ planner (gemini-3.6-flash) ──▶ Action[] ──▶ reducer ──▶ SkuzicState
+event ──▶ planner (gemini-3.8-flash) ──▶ Action[] ──▶ reducer ──▶ SkuzicState
                                                                       │
                                                         weighted prompts + config
                                                                       ▼
@@ -40,7 +40,8 @@ tap one of the preset events.
 
 ## Backends
 
-Pick one in the top bar before starting. Both implement `MusicEngine`
+Pick one in the top bar at any time — switching mid-session reconnects
+under the same mix. The choice persists across reloads. Both implement `MusicEngine`
 (`src/audio/engine.ts`), so everything upstream — reducer, planner, UI — is
 unaware of which is running.
 
@@ -108,10 +109,19 @@ unresolvable target is a no-op rather than a crash.
 Toggle **A/B test** in the Engine menu and every interpret plans the same event
 twice — once with the selected arranger strategy, once with a randomly chosen
 rival — and holds both instead of applying either. The two candidate mixes show
-up blind-labeled A and B; A starts playing immediately, *listen* flips the
-engine to the other, *keep* commits one. Which strategy produced which is only
-revealed in the action log after the choice, so the ear decides rather than the
-label.
+up blind-labeled A and B; A starts playing immediately, *listen* switches to
+the other arm, *keep* commits one. While the choice is up, the Mix rack mirrors
+the arm being auditioned (read-only) rather than the on-hold committed mix.
+Which strategy produced which is only revealed in the action log after the
+choice, so the ear decides rather than the label.
+
+With `VITE_GEMINI_API_KEY_B` set, arm B runs on a second, muted Lyria stream
+under its own key, and *listen* is a pure gain flip — instant switching between
+two complete performances; *keep B* promotes that stream to main so the winner
+never skips. A watchdog watches the audible arm's buffer and quietly falls back
+to single-stream if it starves. Without a B key (or on Magenta — one local
+model, one session), switching re-steers the single stream with a
+`resetContext`, landing as a ducked cut in about a second.
 
 Every choice is saved to IndexedDB as a preference record: the drawing as the
 planner saw it, the event, the mix both plans started from, both full plans
@@ -200,7 +210,7 @@ model — quotas and availability can change without notice.
 ## Stack
 
 React 19 · Vite 8 · TypeScript 7 · pnpm 10 · Tailwind 4 · `@google/genai` 2.13 ·
-`models/lyria-realtime-exp` (v1alpha) · `gemini-3.6-flash` · `magenta-rt` (MLX)
+`models/lyria-realtime-exp` (v1alpha) · `gemini-3.8-flash` · `magenta-rt` (MLX)
 
 `pnpm.onlyBuiltDependencies` is deliberately empty: the only postinstall scripts
 in the tree are `@google/genai`'s (`echo 'preinstall: no-op'`) and protobufjs's,

@@ -44,6 +44,8 @@ export interface MusicEngine {
   setMasterVolume(volume: number): void;
   /** Band energies 0..1 for a meter, or null before audio is running. */
   getLevels(bands: number): number[] | null;
+  /** Seconds of audio queued ahead of the playhead, read live — 0 means a starved stream. */
+  getBufferedSeconds(): number;
   close(): Promise<void>;
 }
 

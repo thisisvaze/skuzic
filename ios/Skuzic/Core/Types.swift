@@ -106,6 +106,21 @@ enum Action: Equatable {
 }
 
 extension Action {
+    /// Drawing updates steer the existing performance. Tempo/key changes and
+    /// explicit resets clear its audio; those remain available in the mix UI.
+    var preservingPlayback: Action? {
+        switch self {
+        case .resetContext:
+            return nil
+        case var .setConfig(patch):
+            patch.bpm = nil
+            patch.scale = nil
+            return patch.isEmpty ? nil : .setConfig(patch)
+        default:
+            return self
+        }
+    }
+
     /// One-line rendering for the action log.
     var summary: String {
         switch self {

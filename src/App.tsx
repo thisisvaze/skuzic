@@ -1,19 +1,13 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
-import { Pause, Play, Square } from 'lucide-react';
+import { ChevronDown, Moon, Pause, Play, Plus, Square, Sun } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { Slider } from '@/components/ui/slider';
 import { cn } from '@/lib/utils';
 import {
   BACKEND_LABELS,
   CAPABILITIES,
+  type EngineEvents,
   type EngineStatus,
   type MusicEngine,
 } from './audio/engine';
@@ -23,6 +17,7 @@ import { reduce, reduceAll } from './core/reducer';
 import { INITIAL_STATE, type Action, type Backend, type SkuzicState } from './core/types';
 import { addRecord, countRecords, exportDataset, type AbRecord } from './lib/dataset';
 import { KEYS, load, save } from './lib/persist';
+import { logSession } from './lib/sessionlog';
 import {
   DEFAULT_PLANNER_CONFIG,
   PLANNER_CONFIGS,
@@ -46,6 +41,19 @@ const BRIDGE_URL =
   (import.meta.env.VITE_MAGENTA_BRIDGE_URL as string | undefined) || DEFAULT_BRIDGE_URL;
 
 const API_KEY = (import.meta.env.VITE_GEMINI_API_KEY as string | undefined) || '';
+
+/**
+ * Optional second key for A/B mode. One key gets one smoothly-generating Lyria
+ * session, so instant switching needs the B arm on its own key. Unset, A/B
+ * still works — switching just cuts the single stream instead.
+ */
+const API_KEY_B = (import.meta.env.VITE_GEMINI_API_KEY_B as string | undefined) || '';
+
+/** A stored backend from an older build may name one that no longer exists. */
+function loadBackend(fallback: Backend): Backend {
+  const saved = load<string>(KEYS.backend, fallback);
+  return saved in BACKEND_LABELS ? (saved as Backend) : fallback;
+}
 
 /**
  * How long the pad must sit still before auto-interpret spends a call. Long
@@ -92,6 +100,7 @@ export default function App() {
   // mix only means something alongside the drawing that produced it.
   const [state, dispatch] = useReducer(reduce, INITIAL_STATE, (initial) => ({
     ...initial,
+    backend: loadBackend(initial.backend),
     config: load(KEYS.config, initial.config),
   }));
   const [status, setStatus] = useState<EngineStatus>('idle');
@@ -102,6 +111,13 @@ export default function App() {
   const [eventText, setEventText] = useState('');
   const [log, setLog] = useState<LogEntry[]>([]);
   const [engineMenuOpen, setEngineMenuOpen] = useState(false);
+  // index.html sets the class before first paint; this only keeps it in sync
+  // with the toggle and writes the choice back.
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => load(KEYS.theme, 'dark'));
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', theme === 'dark');
+    save(KEYS.theme, theme);
+  }, [theme]);
   const [autoInterpret, setAutoInterpret] = useState(
     () => load(KEYS.autoInterpret, false),
   );
@@ -109,6 +125,13 @@ export default function App() {
   const [pendingAb, setPendingAb] = useState<PendingAb | null>(null);
   /** Which pending variant the engine is playing right now. */
   const [abAudition, setAbAudition] = useState(0);
+  /**
+   * The second stream (on API_KEY_B) that makes A/B switching instant.
+   * 'warming' while it connects and buffers, 'ready' once switching is a pure
+   * gain flip, 'failed' when it couldn't start or starved — switching then
+   * falls back to cutting the one main stream.
+   */
+  const [auditionMode, setAuditionMode] = useState<'off' | 'warming' | 'ready' | 'failed'>('off');
   const [datasetCount, setDatasetCount] = useState(0);
   const [plannerModel, setPlannerModel] = useState<PlannerModel>(() => {
     const saved = load(KEYS.plannerModel, DEFAULT_PLANNER_MODEL);
@@ -120,7 +143,17 @@ export default function App() {
   });
 
   const engineRef = useRef<MusicEngine | null>(null);
+  /** The muted second stream playing variant B during an A/B choice. */
+  const auditionEngineRef = useRef<MusicEngine | null>(null);
+  /** Buffer depth of the audition stream, reported through its own events. */
+  const abBufferRef = useRef(0);
   const plannerRef = useRef<ReturnType<typeof createPlanner> | null>(null);
+  /**
+   * Arm B's planner, on the B key when there is one. Rate limits are per key,
+   * and an A/B round is two simultaneous calls — splitting them across keys is
+   * what keeps rounds from tripping 429s and collapsing to one plan.
+   */
+  const plannerBRef = useRef<ReturnType<typeof createPlanner> | null>(null);
   const canvasRef = useRef<CanvasHandle>(null);
   const logSeq = useRef(0);
 
@@ -159,11 +192,25 @@ export default function App() {
   // runPlan gates on it, and a gate that lags a render is a gate with a hole.
   const pendingAbRef = useRef<PendingAb | null>(null);
 
+  // Read inside stable callbacks (auditionAb, the watchdog, the volume
+  // effect) where the state values would be stale closures.
+  const abAuditionRef = useRef(0);
+  useEffect(() => {
+    abAuditionRef.current = abAudition;
+  }, [abAudition]);
+  const masterVolumeRef = useRef(masterVolume);
+  useEffect(() => {
+    masterVolumeRef.current = masterVolume;
+  }, [masterVolume]);
+
   useEffect(() => {
     void countRecords().then(setDatasetCount);
   }, []);
 
   const pushLog = useCallback((entry: Omit<LogEntry, 'id'>) => {
+    // Everything the log shows also lands in .logs/ on disk (dev only), so a
+    // session can be replayed when iterating on the planner prompts.
+    logSession('log', entry);
     setLog((prev) => [{ ...entry, id: ++logSeq.current }, ...prev].slice(0, 40));
   }, []);
 
@@ -237,7 +284,11 @@ export default function App() {
   }, [state.contextEpoch]);
 
   useEffect(() => {
-    engineRef.current?.setMasterVolume(masterVolume);
+    // During a dual-stream audition the slider belongs to whichever arm is
+    // audible; the other stays hard-muted or the point of the mute is lost.
+    const audition = auditionEngineRef.current;
+    if (audition && abAuditionRef.current === 1) audition.setMasterVolume(masterVolume);
+    else engineRef.current?.setMasterVolume(masterVolume);
     save(KEYS.masterVolume, masterVolume);
   }, [masterVolume]);
 
@@ -253,9 +304,17 @@ export default function App() {
   // since it was planned against a model the user just moved off.
   useEffect(() => {
     if (plannerRef.current) plannerRef.current = createPlanner(API_KEY, plannerModel);
+    if (plannerBRef.current)
+      plannerBRef.current = createPlanner(API_KEY_B || API_KEY, plannerModel);
   }, [plannerModel]);
 
-  useEffect(() => () => void engineRef.current?.close(), []);
+  useEffect(
+    () => () => {
+      void engineRef.current?.close();
+      void auditionEngineRef.current?.close();
+    },
+    [],
+  );
 
   // Close Engine on outside click (scale select portals outside the menu).
   useEffect(() => {
@@ -304,9 +363,97 @@ export default function App() {
     }
   }, []);
 
+  /**
+   * Events for any engine, main or audition. Only the engine currently in
+   * engineRef drives the UI; everything else (the muted A/B arm, an engine
+   * just retired by a keep-B swap or a racing stop) is routed to the side.
+   * That routing is what lets chooseAb promote the audition engine to main by
+   * swapping one ref.
+   */
+  const makeEvents = useCallback(
+    (box: { engine: MusicEngine | null }): EngineEvents => ({
+      onStatus: (s: EngineStatus, detail?: string) => {
+        if (engineRef.current !== box.engine) {
+          // A muted arm's health is not the app's health — only its failures
+          // deserve a line.
+          if (s === 'error' && detail) pushLog({ event: 'A/B stream error', error: detail });
+          return;
+        }
+        setStatus(s);
+        setStatusDetail(detail ?? '');
+        if (s === 'error' && detail) pushLog({ event: 'engine error', error: detail });
+      },
+      // A filtered prompt matters in either arm — that arm no longer sounds
+      // like the plan the user is judging.
+      onFilteredPrompt: (text: string, reason: string) =>
+        pushLog({ event: 'prompt filtered', error: `“${text}” — ${reason}` }),
+      onBuffer: (seconds: number) => {
+        if (engineRef.current !== box.engine) {
+          abBufferRef.current = seconds;
+          // First buffered chunk: switching is now a pure gain flip.
+          if (seconds > 0) setAuditionMode((m) => (m === 'warming' ? 'ready' : m));
+          return;
+        }
+        bufferRef.current = seconds;
+        setBuffered(seconds);
+      },
+    }),
+    [pushLog],
+  );
+
+  /**
+   * Start the second stream for variant B, muted, so both A/B arms generate at
+   * once and switching between them is instant. Runs on its own API key —
+   * empirically, two sessions on one key contend for generation — and only for
+   * Lyria: the local Magenta bridge runs one model, one session.
+   */
+  const spawnAudition = useCallback(
+    async (next: SkuzicState) => {
+      if (stateRef.current.backend !== 'lyria' || !API_KEY_B) return;
+
+      const box: { engine: MusicEngine | null } = { engine: null };
+      const engine: MusicEngine = new LyriaEngine(API_KEY_B, makeEvents(box));
+      box.engine = engine;
+      auditionEngineRef.current = engine;
+      abBufferRef.current = 0;
+      setAuditionMode('warming');
+
+      try {
+        // Muted before connect so the scheduler is born silent.
+        engine.setMasterVolume(0);
+        await engine.connect();
+        // The choice may already be over — a keep or dismiss nulls the ref.
+        if (auditionEngineRef.current !== engine) {
+          void engine.close();
+          return;
+        }
+        await engine.setConfig(next.config);
+        if (auditionEngineRef.current !== engine) {
+          void engine.close();
+          return;
+        }
+        const live = next.tracks.filter((t) => !t.muted && t.volume > 0);
+        engine.setPrompts(live.map((t) => ({ text: t.prompt, weight: t.volume })));
+        // Streams into its own buffer, silently; onBuffer flips mode to ready.
+        engine.play();
+      } catch (error) {
+        if (auditionEngineRef.current === engine) {
+          auditionEngineRef.current = null;
+          setAuditionMode('failed');
+          pushLog({
+            event: 'A/B second stream failed — switching falls back to a cut',
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+        void engine.close();
+      }
+    },
+    [makeEvents, pushLog],
+  );
+
   // ---- transport -----------------------------------------------------------
 
-  const start = async () => {
+  const start = async (backend: Backend = stateRef.current.backend) => {
     if (!API_KEY) return;
 
     // engineRef outlives the engine. A stream that closes or errors reports it
@@ -320,31 +467,27 @@ export default function App() {
       await stop();
     }
 
-    const events = {
-      onStatus: (s: EngineStatus, detail?: string) => {
-        setStatus(s);
-        setStatusDetail(detail ?? '');
-        if (s === 'error' && detail) pushLog({ event: 'engine error', error: detail });
-      },
-      onFilteredPrompt: (text: string, reason: string) =>
-        pushLog({ event: 'prompt filtered', error: `“${text}” — ${reason}` }),
-      onBuffer: (seconds: number) => {
-        bufferRef.current = seconds;
-        setBuffered(seconds);
-      },
-    };
-
+    const box: { engine: MusicEngine | null } = { engine: null };
     const engine: MusicEngine =
-      stateRef.current.backend === 'lyria'
-        ? new LyriaEngine(API_KEY, events)
-        : new MagentaEngine(BRIDGE_URL, events);
+      backend === 'lyria'
+        ? new LyriaEngine(API_KEY, makeEvents(box))
+        : new MagentaEngine(BRIDGE_URL, makeEvents(box));
+    box.engine = engine;
 
     engineRef.current = engine;
     // The planner always runs on Gemini, whichever backend makes the audio.
     plannerRef.current = createPlanner(API_KEY, plannerModel);
+    plannerBRef.current = createPlanner(API_KEY_B || API_KEY, plannerModel);
 
     try {
       await engine.connect();
+      // Switching backends mid-connect replaces engineRef while this await is
+      // still pending. Without this guard the stale start goes on to configure
+      // and play a closed engine, and its catch nulls the *new* engine's ref.
+      if (engineRef.current !== engine) {
+        void engine.close();
+        return;
+      }
       engine.setMasterVolume(masterVolume);
 
       await engine.setConfig(stateRef.current.config);
@@ -358,6 +501,7 @@ export default function App() {
         engine.play();
       }
     } catch (error) {
+      if (engineRef.current !== engine) return;
       const message = error instanceof Error ? error.message : String(error);
       pushLog({ event: 'connect failed', error: message });
       setStatus('error');
@@ -376,14 +520,40 @@ export default function App() {
     }
     engineRef.current = null;
     plannerRef.current = null;
+    plannerBRef.current = null;
     hasPlayed.current = false;
     autoPaused.current = false;
     // A pending A/B choice belongs to the session that produced it.
+    try {
+      await auditionEngineRef.current?.close();
+    } catch {
+      // Same as above: the refs still need clearing.
+    }
+    auditionEngineRef.current = null;
     pendingAbRef.current = null;
     setPendingAb(null);
     setAbAudition(0);
+    setAuditionMode('off');
     setStatus('idle');
     setBuffered(0);
+  };
+
+  /**
+   * Switching mid-session swaps the engine under the same mix; the reducer
+   * trims tracks past the new backend's cap. Passing the backend explicitly
+   * matters: stateRef only sees the dispatch after the next render.
+   *
+   * Deliberately allowed *during* a connect. A backend whose server isn't
+   * there — the local Magenta bridge, usually — sits in 'connecting' forever,
+   * and locking the picker while it does is what traps you on it.
+   */
+  const switchBackend = async (next: Backend) => {
+    if (next === stateRef.current.backend) return;
+    dispatch({ type: 'SET_BACKEND', backend: next });
+    save(KEYS.backend, next);
+    if (!engineRef.current) return;
+    await stop();
+    await start(next);
   };
 
   // Same as iOS: connect as soon as the page loads so drawing later does not
@@ -404,10 +574,12 @@ export default function App() {
   const audible = playing && buffered > 0;
 
   /** Stable identity so the equalizer's rAF loop isn't torn down each render. */
-  const getLevels = useCallback(
-    (bands: number) => engineRef.current?.getLevels(bands) ?? null,
-    [],
-  );
+  const getLevels = useCallback((bands: number) => {
+    // The meter should show what's audible — arm B when it's the one playing.
+    const audition = auditionEngineRef.current;
+    if (audition && abAuditionRef.current === 1) return audition.getLevels(bands) ?? null;
+    return engineRef.current?.getLevels(bands) ?? null;
+  }, []);
 
   // ---- the loop: event -> plan -> actions -> state --------------------------
 
@@ -468,8 +640,10 @@ export default function App() {
               const pair: PlannerConfigId[] =
                 Math.random() < 0.5 ? [mine, rival] : [rival, mine];
 
+              // One arm per key: two calls on one key is a 429 magnet.
+              const plannerB = plannerBRef.current ?? planner;
               const settled = await Promise.allSettled(
-                pair.map((id) => planner(jobEvent, base, image, id)),
+                pair.map((id, i) => (i === 0 ? planner : plannerB)(jobEvent, base, image, id)),
               );
 
               if (plannerRef.current === planner) {
@@ -495,9 +669,19 @@ export default function App() {
                   pendingAbRef.current = pending;
                   setPendingAb(pending);
                   setAbAudition(0);
-                  // A starts playing immediately, so the music never stalls
-                  // waiting on the choice.
+                  // A starts playing immediately; the reset drops audio queued
+                  // under the old mix so A is heard in ~a second, as a cut.
+                  // B spins up muted on its own key so switching is instant.
                   steerEngine(variants[0].next);
+                  engineRef.current?.resetContext();
+                  // The pair exists because the user acted, so arm A must be
+                  // audible even when the pad was cleared while the plans were
+                  // in flight — steerEngine's blank-pad gate must not win here.
+                  if (statusRef.current !== 'playing') {
+                    hasPlayed.current = true;
+                    engineRef.current?.play();
+                  }
+                  void spawnAudition(variants[1].next);
                   // A burst of strokes queued behind this pair is void now —
                   // planning is blocked until the user picks anyway.
                   queued.current = null;
@@ -506,8 +690,14 @@ export default function App() {
                   const reason = (settled[failed] as PromiseRejectedResult).reason;
                   if (!survivor) throw reason instanceof Error ? reason : new Error(String(reason));
                   // Half an A/B is no test, but it is still a good steer:
-                  // apply the surviving plan as if the mode were off.
+                  // apply the surviving plan as if the mode were off. Name the
+                  // failed arm's actual error — "fell back" alone hides
+                  // whether this is rate limits or something new.
                   survivor.actions.forEach((action: Action) => dispatch(action));
+                  pushLog({
+                    event: `${jobEvent} — A/B arm failed`,
+                    error: reason instanceof Error ? reason.message : String(reason),
+                  });
                   pushLog({
                     event: `${jobEvent} — A/B fell back to one plan`,
                     reasoning: survivor.reasoning,
@@ -560,7 +750,7 @@ export default function App() {
         setThinking(false);
       }
     },
-    [pushLog, steerEngine],
+    [pushLog, steerEngine, spawnAudition],
   );
 
   /** Auto-interpret: wait for the user to stop drawing before spending a call. */
@@ -600,7 +790,33 @@ export default function App() {
     (index: number) => {
       const pending = pendingAbRef.current;
       if (!pending) return;
-      steerEngine(pending.variants[index].next);
+
+      const audition = auditionEngineRef.current;
+      if (audition) {
+        // Both arms are streaming; switching is a pure gain flip — instant.
+        // play() on the newly audible arm is belt-and-braces: an arm that was
+        // steered while the pad was blank never started generating, and play
+        // is harmless on one that did (unmute honours the arm's own volume).
+        const audible = masterVolumeRef.current;
+        if (index === 1) {
+          engineRef.current?.setMasterVolume(0);
+          audition.setMasterVolume(audible);
+          audition.play();
+        } else {
+          audition.setMasterVolume(0);
+          engineRef.current?.setMasterVolume(audible);
+          if (statusRef.current !== 'playing') {
+            hasPlayed.current = true;
+            engineRef.current?.play();
+          }
+        }
+      } else {
+        // No second stream (no B key, Magenta, or it failed): re-steer the
+        // single stream, and drop audio queued under the other arm so the
+        // switch lands as a ducked cut in ~a second, not a slow morph.
+        steerEngine(pending.variants[index].next);
+        engineRef.current?.resetContext();
+      }
       setAbAudition(index);
     },
     [steerEngine],
@@ -612,11 +828,35 @@ export default function App() {
       if (!pending) return;
       const variant = pending.variants[index];
 
-      // The engine may be playing the *other* arm; steer it to the winner
-      // first, then commit. The tracks effect re-sends the same prompts after
-      // the dispatches land, which is harmless, and the explicit steer is what
-      // restores config if the loser's density/brightness were auditioned last.
-      steerEngine(variant.next);
+      const audition = auditionEngineRef.current;
+      auditionEngineRef.current = null;
+      setAuditionMode('off');
+
+      if (index === 1 && audition) {
+        // The audition stream is already playing the winner — promote it to
+        // main and retire the old engine, so the choice lands without a seam.
+        const old = engineRef.current;
+        engineRef.current = audition;
+        audition.setMasterVolume(masterVolumeRef.current);
+        bufferRef.current = abBufferRef.current;
+        setBuffered(abBufferRef.current);
+        setStatus('playing');
+        if (old) void old.close();
+      } else {
+        if (audition) void audition.close();
+        // The main stream may be muted (B was audible) or on the loser's mix;
+        // restore volume and steer it to the winner, cutting if it was on the
+        // loser. The tracks effect re-sends the same prompts after the
+        // dispatches land — harmless.
+        engineRef.current?.setMasterVolume(masterVolumeRef.current);
+        steerEngine(variant.next);
+        if (abAuditionRef.current !== index) engineRef.current?.resetContext();
+        // Same blank-pad escape hatch as arrival: the winner must be heard.
+        if (statusRef.current !== 'playing') {
+          hasPlayed.current = true;
+          engineRef.current?.play();
+        }
+      }
       variant.plan.actions.forEach((action: Action) => dispatch(action));
 
       pushLog({
@@ -649,6 +889,19 @@ export default function App() {
       void addRecord(record).then((ok) => {
         if (ok) setDatasetCount((n) => n + 1);
       });
+      // The full choice minus the image (that lives in the dataset export) —
+      // both arms on disk is what makes losing prompts inspectable later.
+      logSession('ab_choice', {
+        event: pending.event,
+        chosen: index,
+        decisionMs: record.decisionMs,
+        variants: record.variants.map((v) => ({
+          configId: v.configId,
+          reasoning: v.reasoning,
+          actions: v.actions,
+          tracks: v.tracks.map((t) => ({ label: t.label, prompt: t.prompt, volume: t.volume })),
+        })),
+      });
 
       pendingAbRef.current = null;
       setPendingAb(null);
@@ -660,38 +913,81 @@ export default function App() {
   /** No preference recorded — put the engine back on the mix as it stands. */
   const dismissAb = useCallback(() => {
     if (!pendingAbRef.current) return;
+    logSession('ab_dismiss', { event: pendingAbRef.current.event });
+    const audition = auditionEngineRef.current;
+    auditionEngineRef.current = null;
+    setAuditionMode('off');
+    if (audition) void audition.close();
+    engineRef.current?.setMasterVolume(masterVolumeRef.current);
     steerEngine(stateRef.current);
     pendingAbRef.current = null;
     setPendingAb(null);
     setAbAudition(0);
   }, [steerEngine]);
 
+  // If the audible arm stops producing audio during a dual-stream audition —
+  // a starved or dropped stream, the failure mode that is otherwise pure
+  // silence with no error anywhere — bail out: retire the audition engine and
+  // cut the main stream to whichever arm the user was hearing.
+  useEffect(() => {
+    if (!pendingAb || auditionMode === 'off' || auditionMode === 'failed') return;
+    let dry = 0;
+    const timer = setInterval(() => {
+      const onB = abAuditionRef.current === 1;
+      const audible = onB ? auditionEngineRef.current : engineRef.current;
+      if (!audible || statusRef.current !== 'playing') {
+        dry = 0;
+        return;
+      }
+      dry = audible.getBufferedSeconds() <= 0 ? dry + 1 : 0;
+      if (dry < 4) return;
+
+      const audition = auditionEngineRef.current;
+      auditionEngineRef.current = null;
+      if (audition) void audition.close();
+      setAuditionMode('failed');
+      const pending = pendingAbRef.current;
+      if (pending) {
+        engineRef.current?.setMasterVolume(masterVolumeRef.current);
+        steerEngine(pending.variants[abAuditionRef.current].next);
+        engineRef.current?.resetContext();
+      }
+      pushLog({
+        event: 'A/B stream starved — reverted to single stream',
+        error: 'no audio for 4s; switching now cuts instead of flipping',
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [pendingAb, auditionMode, pushLog, steerEngine]);
+
   // ---- render --------------------------------------------------------------
 
   return (
-    <div className="mx-auto flex max-w-7xl flex-col gap-7 px-5 pt-5 pb-12">
+    <div className="mx-auto flex max-w-[100rem] flex-col gap-7 px-5 pt-5 pb-12">
       <header className="flex flex-wrap items-center gap-3">
         <span className="font-semibold tracking-tight">skuzic</span>
 
         {connected && (
           <>
-            <span className="text-[13px] text-muted-foreground">{BACKEND_LABELS[state.backend]}</span>
-
             <div className="relative" ref={engineMenuRef}>
               <Button
-                variant="ghost"
+                variant="secondary"
                 size="sm"
                 aria-expanded={engineMenuOpen}
                 aria-haspopup="true"
-                className={cn(engineMenuOpen && 'bg-secondary text-foreground')}
+                title="engine settings"
+                className={cn('gap-1', engineMenuOpen && 'bg-accent text-foreground')}
                 onClick={() => setEngineMenuOpen((open) => !open)}
               >
                 Engine
+                <ChevronDown
+                  className={cn('transition-transform', engineMenuOpen && 'rotate-180')}
+                />
               </Button>
               {engineMenuOpen && (
                 <div className="absolute left-0 top-full z-50 pt-2">
-                  <div className="w-[18rem] rounded-2xl bg-popover p-4 text-popover-foreground shadow-lg">
-                    <p className="mb-3 text-[12px] text-muted-foreground/70">
+                  <div className="w-[34rem] max-w-[calc(100vw-2.5rem)] rounded-2xl bg-popover p-5 text-popover-foreground shadow-lg lg:w-[46rem]">
+                    <p className="mb-4 text-[12px] text-muted-foreground/70">
                       {caps.bpm
                         ? 'bpm and scale changes restart generation'
                         : 'blended style embeddings · no tempo or key control'}
@@ -700,6 +996,8 @@ export default function App() {
                       config={state.config}
                       capabilities={caps}
                       dispatch={dispatch}
+                      backend={state.backend}
+                      onBackendChange={(b) => void switchBackend(b)}
                       autoInterpret={autoInterpret}
                       onAutoInterpretChange={(on) => {
                         setAutoInterpret(on);
@@ -735,9 +1033,13 @@ export default function App() {
               }
               aria-label={`${status} · ${buffered.toFixed(1)}s`}
             />
+          </>
+        )}
 
-            <div className="flex-1" />
+        <div className="flex-1" />
 
+        {connected && (
+          <>
             <Slider
               className="w-24"
               value={[masterVolume * 100]}
@@ -755,10 +1057,15 @@ export default function App() {
                 // Either way the user now owns playback state; an earlier
                 // empty-mix auto-pause must not resume over their head.
                 autoPaused.current = false;
+                // Both arms of a dual-stream audition pause and resume
+                // together — play() on the muted arm cannot unmute it, since
+                // the scheduler returns to its own (zero) volume.
                 if (playing) {
                   engineRef.current?.pause();
+                  auditionEngineRef.current?.pause();
                 } else if (!canvasRef.current?.isEmpty()) {
                   engineRef.current?.play();
+                  auditionEngineRef.current?.play();
                 }
               }}
             >
@@ -769,10 +1076,22 @@ export default function App() {
             </Button>
           </>
         )}
+
+        <Button
+          size="icon"
+          variant="ghost"
+          aria-label={theme === 'dark' ? 'switch to light theme' : 'switch to dark theme'}
+          title={theme === 'dark' ? 'light theme' : 'dark theme'}
+          onClick={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
+        >
+          {theme === 'dark' ? <Sun /> : <Moon />}
+        </Button>
       </header>
 
-      <main className="flex flex-col gap-7">
-        <section>
+      {/* Wide screens put the pad beside the mix so drawing and the plan it
+          produces sit in one eyeline; below xl everything stacks as before. */}
+      <main className="grid grid-cols-1 gap-7 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] xl:items-start">
+        <section className="min-w-0">
           <DrawCanvas
             ref={canvasRef}
             autoInterpret={autoInterpret}
@@ -781,7 +1100,7 @@ export default function App() {
             getLevels={getLevels}
             interpretDisabled={!connected || !!pendingAb}
             showStart={!connected}
-            onStart={start}
+            onStart={() => void start()}
             startDisabled={!API_KEY || status === 'connecting'}
             startTitle={
               !API_KEY
@@ -791,27 +1110,6 @@ export default function App() {
                   : status === 'error'
                     ? statusDetail || 'retry'
                     : 'start'
-            }
-            startExtras={
-              <Select
-                value={state.backend}
-                onValueChange={(v) => dispatch({ type: 'SET_BACKEND', backend: v as Backend })}
-              >
-                <SelectTrigger
-                  aria-label="music model"
-                  title="Choose a music model"
-                  className="w-[190px] bg-[#15130f]/80 text-[#f4f1ea] shadow-md backdrop-blur-sm"
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {(Object.keys(BACKEND_LABELS) as Backend[]).map((b) => (
-                    <SelectItem key={b} value={b}>
-                      {BACKEND_LABELS[b]}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
             }
             onInterpret={() => trigger('Recognized Input Update', true)}
             onAutoInterpret={() => queueAutoPlan('Recognized Input Update', true)}
@@ -832,46 +1130,65 @@ export default function App() {
                 value={eventText}
                 onChange={(e) => setEventText(e.target.value)}
               />
-              <Button variant="ghost" disabled={thinking || !!pendingAb || !eventText.trim()}>
-                fire
+              <Button
+                size="icon"
+                aria-label="fire event"
+                title="fire event"
+                disabled={thinking || !!pendingAb || !eventText.trim()}
+              >
+                <Plus />
               </Button>
             </form>
           )}
         </section>
 
-        {pendingAb && (
-          <AbChoice
-            variants={pendingAb.variants.map((v) => ({
-              reasoning: v.plan.reasoning,
-              tracks: v.next.tracks,
-              config: v.next.config,
-            }))}
-            baseConfig={pendingAb.base.config}
-            audition={abAudition}
-            onAudition={auditionAb}
-            onChoose={chooseAb}
-            onDismiss={dismissAb}
-          />
-        )}
+        <div className="flex min-w-0 flex-col gap-7">
+          {pendingAb && (
+            <AbChoice
+              variants={pendingAb.variants.map((v) => ({
+                reasoning: v.plan.reasoning,
+                tracks: v.next.tracks,
+                config: v.next.config,
+              }))}
+              baseConfig={pendingAb.base.config}
+              audition={abAudition}
+              warming={auditionMode === 'warming'}
+              onAudition={auditionAb}
+              onChoose={chooseAb}
+              onDismiss={dismissAb}
+            />
+          )}
 
-        {connected && (
-          <div className="grid grid-cols-1 items-start gap-x-6 gap-y-7 md:grid-cols-2">
-            <section className="min-w-0">
-              <h2 className="mb-2.5 flex items-baseline gap-2 text-[13px] text-muted-foreground">
-                Mix
-                <span className="text-muted-foreground/60">
-                  {state.tracks.length} / {caps.maxPrompts} tracks
-                </span>
-              </h2>
-              <TrackRack tracks={state.tracks} dispatch={dispatch} />
-            </section>
+          {connected && (
+            <div className="grid grid-cols-1 items-start gap-x-6 gap-y-7 md:grid-cols-2 xl:grid-cols-1">
+              <section className="min-w-0">
+                <h2 className="mb-2.5 flex items-baseline gap-2 text-[13px] text-muted-foreground">
+                  Mix
+                  <span className="text-muted-foreground/60">
+                    {pendingAb
+                      ? `auditioning ${abAudition === 0 ? 'A' : 'B'} · ${
+                          pendingAb.variants[abAudition].next.tracks.length
+                        } / ${caps.maxPrompts} tracks`
+                      : `${state.tracks.length} / ${caps.maxPrompts} tracks`}
+                  </span>
+                </h2>
+                {/* While a choice is pending the rack mirrors the arm being
+                    auditioned, read-only — the committed mix is on hold and
+                    showing it here only misleads. */}
+                <TrackRack
+                  tracks={pendingAb ? pendingAb.variants[abAudition].next.tracks : state.tracks}
+                  dispatch={dispatch}
+                  readOnly={!!pendingAb}
+                />
+              </section>
 
-            <section className="min-w-0">
-              <h2 className="mb-2.5 text-[13px] text-muted-foreground">Actions</h2>
-              <ActionLog entries={log} />
-            </section>
-          </div>
-        )}
+              <section className="min-w-0">
+                <h2 className="mb-2.5 text-[13px] text-muted-foreground">Flow</h2>
+                <ActionLog entries={log} />
+              </section>
+            </div>
+          )}
+        </div>
       </main>
     </div>
   );

@@ -1,9 +1,11 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>skuzic</title>
+    <!-- Applied before first paint so a saved light theme doesn't flash black. -->
+    <script>try{document.documentElement.classList.toggle('dark',JSON.parse(localStorage.getItem('skuzic_theme')||'"dark"')==='dark')}catch(e){}</script>
   </head>
   <body>
     <div id="root"></div>

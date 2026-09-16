@@ -3,8 +3,36 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* Pure-black surface stack: page is #000, cards lift with fills, never borders. */
+/* Two surface stacks. Light is the paper the pad already draws on; dark is the
+   original pure-black stack. Neither uses borders to separate — fills do it. */
 :root {
+  --radius: 1rem;
+  /* Deliberately a shade *darker* than the pad's paper (#f4f1ea ≈ L 0.955):
+     the sheet and the cards have to lift off the page, and this stack has no
+     borders to fall back on. */
+  --background: oklch(0.912 0.006 85);
+  --foreground: oklch(0.24 0.012 85);
+  --card: oklch(0.972 0.004 85);
+  --card-foreground: oklch(0.24 0.012 85);
+  --popover: oklch(0.985 0.003 85);
+  --popover-foreground: oklch(0.24 0.012 85);
+  --primary: oklch(0.24 0.012 85);
+  --primary-foreground: oklch(0.97 0.006 85);
+  --secondary: oklch(0.858 0.008 85);
+  --secondary-foreground: oklch(0.24 0.012 85);
+  --muted: oklch(0.858 0.008 85);
+  --muted-foreground: oklch(0.45 0.012 85);
+  --accent: oklch(0.8 0.01 85);
+  --accent-foreground: oklch(0.2 0.012 85);
+  --destructive: oklch(0.52 0.19 25);
+  --border: oklch(0 0 0 / 12%);
+  --input: oklch(0.858 0.008 85);
+  --ring: oklch(0.5 0 0);
+  --live: oklch(0.6 0.13 165);
+  --warn: oklch(0.62 0.12 85);
+}
+
+.dark {
   --radius: 1rem;
   --background: oklch(0 0 0);
   --foreground: oklch(0.93 0 0);

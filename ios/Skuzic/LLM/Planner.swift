@@ -178,6 +178,8 @@ Rules:
 - bpm restarts generation the same way. Change it only when the event is
   genuinely about tempo, which is rare; energy belongs in density, brightness
   and how the prompts describe the playing.
+- Drawing updates must never emit bpm, scale or RESET_CONTEXT. Keep the current
+  performance running and express changes through prompts and the live controls.
 - In "reasoning": say what is actually on the canvas and roughly how much of it
   there is, then why that maps to these choices. Two sentences, about 35 words.
   Describing the drawing concretely is what grounds the actions in it. Going
@@ -220,19 +222,19 @@ enum PlannerError: LocalizedError {
 /// lite one to fall back to when latency matters more than the arrangement.
 /// Mirrors `PLANNER_MODELS` on the web side.
 enum PlannerModel: String, CaseIterable, Identifiable {
-    case flash36 = "gemini-3.6-flash"
+    case flash38 = "gemini-3.8-flash"
     case flashLite35 = "gemini-3.5-flash-lite"
 
     var id: String { rawValue }
 
     var label: String {
         switch self {
-        case .flash36: return "Flash 3.6 — better plans"
+        case .flash38: return "Flash 3.8 — better plans"
         case .flashLite35: return "Flash Lite 3.5 — fastest"
         }
     }
 
-    static let `default`: PlannerModel = .flash36
+    static let `default`: PlannerModel = .flash38
 }
 
 struct Planner {
@@ -263,7 +265,7 @@ struct Planner {
                 "responseMimeType": "application/json",
                 "responseSchema": planSchema,
                 // Latency matters more than depth here — this fires on a tap.
-                "thinkingConfig": ["thinkingLevel": "MINIMAL"],
+                "thinkingConfig": ["thinkingLevel": "LOW"],
                 // A rough sketch only has to read as a *shape*; low resolution
                 // is plenty for that and cuts the prefill substantially.
                 "mediaResolution": "MEDIA_RESOLUTION_LOW",
@@ -289,12 +291,10 @@ struct Planner {
         do {
             (data, response) = try await URLSession.shared.data(for: request)
         } catch {
-            // The whole error, once, where the Xcode console can show it. The
-            // action log only has room for a line, and a line is not enough to
-            // debug a transport failure. Keep the elapsed time either way, so a
-            // cliff is visible as a cliff rather than as a vague "it failed".
+            // The store logs duration and error codes for every failed plan.
+            // Keep NSError.userInfo (which can contain request URLs) out of logs.
             let elapsed = Int(Date().timeIntervalSince(startedAt) * 1000)
-            print("[skuzic] planner failed after \(elapsed)ms: \(error)")
+            Diagnostics.failure(.planner, "HTTP_FAILED elapsed_ms=\(elapsed)", error)
             if (error as? URLError)?.code == .timedOut {
                 throw PlannerError.timedOut(elapsed)
             }

@@ -175,6 +175,10 @@ export class MagentaEngine implements MusicEngine {
     return this.scheduler?.getLevels(bands) ?? null;
   }
 
+  getBufferedSeconds(): number {
+    return this.scheduler?.bufferedSeconds ?? 0;
+  }
+
   getStatus(): EngineStatus {
     return this.status;
   }

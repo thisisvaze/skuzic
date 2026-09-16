@@ -9,6 +9,11 @@ import type { Action, Track } from '../core/types';
 interface Props {
   tracks: Track[];
   dispatch: (action: Action) => void;
+  /**
+   * Display-only mode for auditioning an A/B candidate: edits to a mix that
+   * isn't committed would desync what's heard from what gets recorded.
+   */
+  readOnly?: boolean;
 }
 
 /** Hues spread far enough apart that adjacent tracks never read as the same colour. */
@@ -25,7 +30,7 @@ function tint(id: string): CSSProperties {
   } as CSSProperties;
 }
 
-export function TrackRack({ tracks, dispatch }: Props) {
+export function TrackRack({ tracks, dispatch, readOnly = false }: Props) {
   if (!tracks.length) {
     return (
       <p className="rounded-2xl bg-card px-4 py-5 text-sm text-muted-foreground">
@@ -55,20 +60,23 @@ export function TrackRack({ tracks, dispatch }: Props) {
             >
               {track.label}
             </span>
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label={`Remove ${track.label}`}
-              className="ml-auto shrink-0 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 @md:hidden"
-              onClick={() => dispatch({ type: 'REMOVE_TRACK', target: track.id })}
-            >
-              <X />
-            </Button>
+            {!readOnly && (
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label={`Remove ${track.label}`}
+                className="ml-auto shrink-0 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 @md:hidden"
+                onClick={() => dispatch({ type: 'REMOVE_TRACK', target: track.id })}
+              >
+                <X />
+              </Button>
+            )}
           </div>
 
           <input
             value={track.prompt}
             spellCheck={false}
+            readOnly={readOnly}
             aria-label={`${track.label} prompt`}
             className="w-full truncate bg-transparent text-[13px] text-muted-foreground outline-none hover:text-foreground focus:text-foreground @md:col-start-1"
             onChange={(e) =>
@@ -79,6 +87,7 @@ export function TrackRack({ tracks, dispatch }: Props) {
           <div className="flex items-center gap-2 @md:col-start-2 @md:row-span-2 @md:row-start-1">
             <Slider
               fat
+              disabled={readOnly}
               value={[track.volume * 100]}
               max={100}
               step={1}
@@ -92,21 +101,24 @@ export function TrackRack({ tracks, dispatch }: Props) {
               variant="ghost"
               size="sm"
               className="shrink-0"
+              disabled={readOnly}
               onClick={() =>
                 dispatch({ type: 'SET_MUTED', target: track.id, muted: !track.muted })
               }
             >
               {track.muted ? 'muted' : 'live'}
             </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label={`Remove ${track.label}`}
-              className="hidden shrink-0 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 @md:block"
-              onClick={() => dispatch({ type: 'REMOVE_TRACK', target: track.id })}
-            >
-              <X />
-            </Button>
+            {!readOnly && (
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label={`Remove ${track.label}`}
+                className="hidden shrink-0 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 @md:block"
+                onClick={() => dispatch({ type: 'REMOVE_TRACK', target: track.id })}
+              >
+                <X />
+              </Button>
+            )}
           </div>
         </div>
       ))}

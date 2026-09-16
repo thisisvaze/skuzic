@@ -51,7 +51,10 @@ final class CanvasController: NSObject, ObservableObject {
     @Published private(set) var canUndo = false
     @Published private(set) var canRedo = false
 
-    /// Fired when a stroke finishes, so auto-interpret can react.
+    /// Auto-interpret waits until the tool lifts and cancels when it touches down.
+    private(set) var isDrawing = false
+    private var strokeStartedAt: TimeInterval = 0
+    var onStrokeBegin: (() -> Void)?
     var onStrokeEnd: (() -> Void)?
 
     override init() {
@@ -157,9 +160,14 @@ final class CanvasController: NSObject, ObservableObject {
     }
 
     private func refresh() {
-        hasInk = !canvas.drawing.strokes.isEmpty
-        canUndo = canvas.undoManager?.canUndo ?? false
-        canRedo = canvas.undoManager?.canRedo ?? false
+        let ink = !canvas.drawing.strokes.isEmpty
+        let undo = canvas.undoManager?.canUndo ?? false
+        let redo = canvas.undoManager?.canRedo ?? false
+        // PencilKit calls this throughout a stroke. Publishing unchanged values
+        // needlessly rebuilds the surrounding SwiftUI view on every move.
+        if hasInk != ink { hasInk = ink }
+        if canUndo != undo { canUndo = undo }
+        if canRedo != redo { canRedo = redo }
     }
 
     // MARK: - Commands
@@ -248,13 +256,24 @@ extension CanvasController: UIGestureRecognizerDelegate {
 }
 
 extension CanvasController: PKCanvasViewDelegate {
+    nonisolated func canvasViewDidBeginUsingTool(_ canvasView: PKCanvasView) {
+        MainActor.assumeIsolated {
+            isDrawing = true
+            strokeStartedAt = Diagnostics.now
+            Diagnostics.event(.drawing, "STROKE_BEGIN")
+            onStrokeBegin?()
+        }
+    }
+
     nonisolated func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
         MainActor.assumeIsolated { refresh() }
     }
 
     nonisolated func canvasViewDidEndUsingTool(_ canvasView: PKCanvasView) {
         MainActor.assumeIsolated {
+            isDrawing = false
             refresh()
+            Diagnostics.event(.drawing, "STROKE_END elapsed_ms=\(Diagnostics.milliseconds(since: strokeStartedAt)) strokes=\(canvas.drawing.strokes.count)")
             onStrokeEnd?()
         }
     }
