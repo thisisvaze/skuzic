@@ -38,8 +38,8 @@ Get a key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey).
 Click **start**, then either draw on the canvas and hit *interpret drawing*, or
 tap one of the preset events.
 
-> The key runs in the browser. Fine for a local prototype, not for deployment —
-> see [Going public](#going-public).
+> Your key stays on your machine when you run locally. Don't host the built app
+> on a public website — see [Deploying](#deploying).
 
 ## Backends
 
@@ -203,12 +203,18 @@ Gameplay events, sensor data, and scroll position all fit the same
 **Note conditioning.** MRT2 accepts a 128-channel pianoroll that skuzic doesn't
 use. Drawn pitch material is the obvious extension.
 
-### Going public
+### Deploying
 
-`VITE_GEMINI_API_KEY` is bundled into client JS. Before deploying, move both
-calls behind a backend: proxy the Lyria WebSocket, and either proxy the planner
-or issue ephemeral tokens server-side. Lyria RealTime is also an **experimental**
-model — quotas and availability can change without notice.
+Running skuzic locally is safe. **Hosting it on a public website is not, yet:**
+`pnpm build` copies `VITE_GEMINI_API_KEY` into the JavaScript it outputs, so
+anyone who opens the site can read your key and spend your quota.
+
+To host it safely, add a small server that holds the key and sits between the
+browser and Google: it forwards the Lyria WebSocket and the planner calls (or
+hands the browser short-lived tokens instead). Contributions welcome.
+
+Also note Lyria RealTime is an **experimental** Google model — quotas and
+availability can change without notice.
 
 ## Stack
 

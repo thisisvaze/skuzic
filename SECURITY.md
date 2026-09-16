@@ -5,4 +5,4 @@ Please report vulnerabilities privately through GitHub:
 
 Known by design: skuzic is a prototype that runs your Gemini key in the
 browser (web) or bakes it into the app binary (iOS). Don't deploy either
-publicly with a real key. See [Going public](README.md#going-public).
+publicly with a real key. See [Deploying](README.md#deploying).
