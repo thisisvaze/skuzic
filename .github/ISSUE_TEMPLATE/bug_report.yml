@@ -1,0 +1,42 @@
+name: Bug report
+description: Something is broken or sounds wrong
+labels: [bug]
+body:
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where
+      options: [Web app, iOS app, Magenta bridge, Other]
+    validations:
+      required: true
+  - type: dropdown
+    id: backend
+    attributes:
+      label: Music backend
+      options: [Lyria RealTime, Magenta RT2, Not sure]
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Click start
+        2. Draw a house, hit interpret
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What happened vs what you expected
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs, action log, or recording
+      description: Browser console output, the in-app action log, or a short screen recording. Remove any API keys first.
+  - type: input
+    id: env
+    attributes:
+      label: Environment
+      placeholder: Chrome 140 on macOS 26 / iPad Pro M4, iPadOS 26

@@ -1,0 +1,16 @@
+name: Idea or feature request
+description: Suggest something new
+labels: [enhancement]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: The idea
+      description: What should skuzic do, and what would it feel like to play?
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why
+      description: What does this make possible, or what's frustrating today?

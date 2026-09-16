@@ -2,6 +2,7 @@
   "name": "skuzic",
   "private": true,
   "version": "0.1.0",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "type": "module",
   "packageManager": "pnpm@10.23.0",
   "pnpm": {

@@ -1,5 +1,8 @@
 # skuzic
 
+[![CI](https://github.com/thisisvaze/skuzic/actions/workflows/ci.yml/badge.svg)](https://github.com/thisisvaze/skuzic/actions/workflows/ci.yml)
+[![License: PolyForm Noncommercial](https://img.shields.io/badge/license-PolyForm%20Noncommercial-blue)](LICENSE.md)
+
 A live generative-music instrument where **semantic events drive a mix**.
 
 You draw something, or fire an event like `user drew a house`. A planner model
@@ -216,3 +219,15 @@ React 19 · Vite 8 · TypeScript 7 · pnpm 10 · Tailwind 4 · `@google/genai` 2
 in the tree are `@google/genai`'s (`echo 'preinstall: no-op'`) and protobufjs's,
 neither of which affects a browser bundle. Build output is byte-identical with
 them skipped.
+
+## Contributing
+
+Bug reports, ideas and PRs are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md)
+for setup and checks, or [open an issue](https://github.com/thisisvaze/skuzic/issues/new/choose).
+
+## License
+
+[PolyForm Noncommercial 1.0.0](LICENSE.md) © 2026 Aaditya Vaze.
+Free for personal, research and educational use. **Commercial use is not
+permitted.** If you share or build on skuzic, keep the copyright notice and
+credit the project.
