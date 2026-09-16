@@ -1,6 +1,6 @@
 # Magenta bridge
 
-Magenta RealTime 2 ships no server component — it's a Python library plus an
+Magenta RealTime 2 ships no server component. It's a Python library plus an
 MLX/C++ engine. `magenta_bridge.py` wraps it in a WebSocket that speaks the
 same shape skuzic already uses for Lyria, so the browser can treat both
 backends identically.
@@ -24,7 +24,7 @@ python3 -m venv .venv
 .venv/bin/mrt models download mrt2_base      # exported model, ~2.6 GB
 ```
 
-Pass the model name explicitly — bare `mrt models download` opens an
+Pass the model name explicitly: bare `mrt models download` opens an
 interactive picker that will hang a non-interactive shell.
 
 In VS Code this is the **skuzic: setup magenta** task; it's idempotent.
@@ -38,7 +38,7 @@ MRT2 ships weights two ways, and they load through *different* classes:
 | `mrt models download` | exported `.mlxfn` | `MagentaRT2SystemMlxfn` | `--weights mlxfn` (default) |
 | `mrt checkpoints download` | raw `.safetensors` | `MagentaRT2System` | `--weights checkpoint` |
 
-The bridge defaults to `mlxfn` — it's what `mrt models download` gives you and
+The bridge defaults to `mlxfn`. It's what `mrt models download` gives you and
 it's the optimized path. Using `MagentaRT2System` against a `models/` download
 fails with a missing `checkpoints/mrt2_base.safetensors`, because it wants the
 raw checkpoint instead.
@@ -50,15 +50,15 @@ python server/magenta_bridge.py --size mrt2_base
 ```
 
 Then pick **Magenta RT2 (local)** in the skuzic top bar and hit start. The
-Gemini API key is still required — the planner runs on Gemini regardless of
+Gemini API key is still required, since the planner runs on Gemini regardless of
 which model generates audio.
 
 Useful flags:
 
-- `--size mrt2_small` — lighter, lower quality, starts faster
-- `--chunk-frames 10` — 400 ms per generation step instead of 1 s; lower
+- `--size mrt2_small`: lighter, lower quality, starts faster
+- `--chunk-frames 10`: 400 ms per generation step instead of 1 s; lower
   latency, more overhead per step
-- `--port 8765` — override, then set `VITE_MAGENTA_BRIDGE_URL` to match
+- `--port 8765`: override, then set `VITE_MAGENTA_BRIDGE_URL` to match
 
 ## How prompt weighting works
 
@@ -68,7 +68,7 @@ embedded once and cached, then the live set is combined as a weighted average
 of those 768-dim vectors before being passed to `generate()`.
 
 That's what makes a volume fader crossfade continuously rather than switch
-between prompts — it's moving through embedding space, not picking a winner.
+between prompts. It's moving through embedding space, not picking a winner.
 The C++ engine exposes the same idea natively as `reblend_musiccoca_tokens`.
 
 ## What MRT2 does not have
@@ -85,11 +85,11 @@ them. What does map across:
 | reset context | drops rolling state, restarts from silence |
 
 MRT2 also has MIDI note conditioning (128-channel pianoroll) that skuzic
-doesn't use — an obvious extension if you want drawn pitch material.
+doesn't use, an obvious extension if you want drawn pitch material.
 
 ## Latency
 
-Steering latency — fader move to audible change — is dominated by **buffered
+Steering latency (fader move to audible change) is dominated by **buffered
 audio, not compute**. The chain is:
 
 ```
@@ -100,7 +100,7 @@ mixer tick (≤100ms) → embed, queued behind in-flight generate (≤146ms)
 
 ### Chunk size is free
 
-Throughput is flat across chunk sizes on an M5 Pro — per-call overhead is
+Throughput is flat across chunk sizes on an M5 Pro. Per-call overhead is
 negligible, so a small chunk costs nothing and cuts latency directly:
 
 | frames | audio | generate | RTF |
@@ -116,14 +116,14 @@ in larger chunks.
 
 ### Tuning
 
-- `DEFAULT_CHUNK_FRAMES` (5) — frames per `generate()`. Lower is lower latency.
-- `MAX_LEAD_SECONDS` (0.6) — server-side buffer. The throttle checks *before*
+- `DEFAULT_CHUNK_FRAMES` (5): frames per `generate()`. Lower is lower latency.
+- `MAX_LEAD_SECONDS` (0.6): server-side buffer. The throttle checks *before*
   generating, so effective lead settles at `MAX_LEAD + one chunk` (~800 ms).
-- `leadIn` in `src/audio/scheduler.ts` (0.4s) — browser-side buffer.
+- `leadIn` in `src/audio/scheduler.ts` (0.4s): browser-side buffer.
 
 RTF 0.73 leaves 27% headroom to refill, so these are safe. Measured over 12s at
-the defaults: median inter-chunk gap 200 ms against a 200 ms chunk — exactly
-real-time — with 208 ms worst case, i.e. 8 ms of jitter. Push the buffers lower
+the defaults: median inter-chunk gap 200 ms against a 200 ms chunk (exactly
+real-time), with 208 ms worst case, i.e. 8 ms of jitter. Push the buffers lower
 if you want tighter response; raise them if you hear gaps under load.
 
 ### If you need more headroom

@@ -1,239 +1,62 @@
 # skuzic
 
+**Draw something. Hear it turn into music.**
+
 [![CI](https://github.com/thisisvaze/skuzic/actions/workflows/ci.yml/badge.svg)](https://github.com/thisisvaze/skuzic/actions/workflows/ci.yml)
 [![License: PolyForm Noncommercial](https://img.shields.io/badge/license-PolyForm%20Noncommercial-blue)](LICENSE.md)
 
-A live generative-music instrument where **semantic events drive a mix**.
-
-You draw something, or fire an event like `user drew a house`. A planner model
-reads that event alongside the current mix and returns a list of **actions**
-(`ADD_TRACK`, `SET_VOLUME`, `MODIFY_TRACK`, …). A pure reducer applies those
-actions to state. The state is then continuously synced to
-[Lyria RealTime](https://ai.google.dev/gemini-api/docs/realtime-music-generation),
-which streams music that changes under your hands — no restarts, no clip
-stitching.
+skuzic is an instrument you play with a pen. Sketch a house and the music gets
+warm and woody. Scribble a storm and it darkens. The song never stops or
+restarts. It just keeps bending around whatever you draw.
 
 ```
-event ──▶ planner (gemini-3.8-flash) ──▶ Action[] ──▶ reducer ──▶ SkuzicState
-                                                                      │
-                                                        weighted prompts + config
-                                                                      ▼
-                                                      Lyria RealTime (WebSocket)
-                                                                      │
-                                                          48kHz PCM chunks
-                                                                      ▼
-                                                     Web Audio gapless scheduler
+you draw a house
+  → Gemini reads it: "shelter, warmth, wooden timbres"
+  → the mix changes: add a track, fade another
+  → Lyria RealTime plays the new sound, live
 ```
 
-## Setup
+Works in the browser and on iPad/iPhone. On a Mac you can also generate the
+audio locally with Google's open Magenta RT2 model.
+
+## Try it
 
 ```bash
 pnpm install
-cp .env.example .env      # add your key, or paste it into the UI at runtime
+cp .env.example .env   # paste a key from aistudio.google.com/apikey
 pnpm dev
 ```
 
-Get a key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey).
+Open http://localhost:5173, hit **start**, and draw.
 
-Click **start**, then either draw on the canvas and hit *interpret drawing*, or
-tap one of the preset events.
+## Build it with us
 
-> Your key stays on your machine when you run locally. Don't host the built app
-> on a public website — see [Deploying](#deploying).
+skuzic is early and there's a lot of fun stuff left to make:
 
-## Backends
+- 🎛️ **Give it taste.** One prompt in `src/llm/planner.ts` decides how drawings
+  sound. You don't need to know anything about audio to make it better.
+- ✏️ **Read drawings better.** Right now the whole canvas is one image. Where
+  you draw, how fast, and which colors you pick could all shape the music.
+- 🎹 **Draw melodies.** Magenta RT2 takes piano-roll notes that skuzic ignores
+  today. Lines could become tunes.
+- 🎮 **Play it with anything.** Game events, sensors, scrolling. If it can say
+  "something happened", it can make music.
+- 🌍 **Put it online.** A tiny server that holds the API key would let anyone
+  play skuzic in their browser.
 
-Pick one in the top bar at any time — switching mid-session reconnects
-under the same mix. The choice persists across reloads. Both implement `MusicEngine`
-(`src/audio/engine.ts`), so everything upstream — reducer, planner, UI — is
-unaware of which is running.
+Grab a [good first issue](https://github.com/thisisvaze/skuzic/labels/good%20first%20issue),
+[share an idea](https://github.com/thisisvaze/skuzic/issues/new/choose), or read
+[CONTRIBUTING.md](CONTRIBUTING.md) to get set up. Curious how it works under the
+hood? See [docs/how-it-works.md](docs/how-it-works.md).
 
-| | Lyria RealTime | Magenta RT2 |
-| --- | --- | --- |
-| Runs | Google's servers | your Mac |
-| Needs | API key | Apple Silicon + local bridge |
-| Weights | closed | open (CC-BY-4.0) |
-| Max tracks | 8 | 6 |
-| Controls | bpm, scale, density, brightness, guidance, bass/drums | guidance, drums |
+## Good to know
 
-Magenta requires the local bridge in [`server/`](server/README.md) — MRT2 ships
-no server component, so that wraps its Python API in a WebSocket. **The Gemini
-key is needed either way**: the planner always runs on Gemini, whichever model
-generates audio.
-
-The control surfaces genuinely differ — MRT2 conditions on blended MusicCoCa
-style embeddings and has no concept of tempo or key. Rather than let dead knobs
-sit in the UI, `CAPABILITIES` drives both which controls render and what the
-planner is told it may emit.
-
-## The state model
-
-A **track** is one weighted text prompt. Its `volume` is the prompt's weight,
-and the engine normalizes weights across all live tracks — so volume is
-*relative prominence in the mix*, not a gain stage.
-
-```ts
-interface Track {
-  id: string;
-  label: string;   // short name the planner reasons about
-  prompt: string;  // what Lyria actually receives
-  volume: number;  // 0..1, relative weight
-  muted: boolean;
-  origin: string;  // the event that created it
-}
-```
-
-The reducer (`src/core/reducer.ts`) is pure and fully tested:
-
-```bash
-pnpm test
-```
-
-### Actions
-
-| Action | Effect |
-| --- | --- |
-| `ADD_TRACK` | Adds a weighted prompt; evicts the quietest track at capacity (8) |
-| `REMOVE_TRACK` | Drops a track |
-| `MODIFY_TRACK` | Rewrites a track's prompt or label in place |
-| `SET_VOLUME` | Changes relative weight |
-| `SET_MUTED` | Excludes a track without deleting it |
-| `SET_CONFIG` | bpm, density, brightness, guidance, scale, mute bass/drums |
-| `CLEAR_TRACKS` | Empties the mix |
-| `RESET_CONTEXT` | Forces the model to restart generation |
-
-Track-scoped actions take a `target` that is either an id or a label. The
-planner is told to use ids, but it drifts toward the labels it just invented, so
-`resolve()` falls back to exact, then substring, then prompt matching. An
-unresolvable target is a no-op rather than a crash.
-
-## A/B mode
-
-Toggle **A/B test** in the Engine menu and every interpret plans the same event
-twice — once with the selected arranger strategy, once with a randomly chosen
-rival — and holds both instead of applying either. The two candidate mixes show
-up blind-labeled A and B; A starts playing immediately, *listen* switches to
-the other arm, *keep* commits one. While the choice is up, the Mix rack mirrors
-the arm being auditioned (read-only) rather than the on-hold committed mix.
-Which strategy produced which is only revealed in the action log after the
-choice, so the ear decides rather than the label.
-
-With `VITE_GEMINI_API_KEY_B` set, arm B runs on a second, muted Lyria stream
-under its own key, and *listen* is a pure gain flip — instant switching between
-two complete performances; *keep B* promotes that stream to main so the winner
-never skips. A watchdog watches the audible arm's buffer and quietly falls back
-to single-stream if it starves. Without a B key (or on Magenta — one local
-model, one session), switching re-steers the single stream with a
-`resetContext`, landing as a ducked cut in about a second.
-
-Every choice is saved to IndexedDB as a preference record: the drawing as the
-planner saw it, the event, the mix both plans started from, both full plans
-(strategy, reasoning, actions, resulting tracks and config), which one won, and
-how long the decision took. **export** in the same menu downloads the lot as
-JSONL (`src/lib/dataset.ts`) — ready-made (input → chosen) pairs for SFT, or
-(chosen, rejected) pairs for DPO, on a future planner.
-
-## Non-obvious things this prototype gets right
-
-These are the details that separate "it makes noise" from "it feels like an
-instrument":
-
-**Weights ramp, they don't snap.** Replacing the prompt set outright produces an
-audible jump cut. `LyriaEngine` keeps a `current` and a `target` weight map and
-walks between them over ~1s at 10Hz (`src/audio/lyria.ts`). That interpolation
-*is* the DJ-blend feel.
-
-**A weight of zero is invalid.** The API rejects it. Tracks fade to an epsilon
-and are then dropped from the array entirely. An empty prompt list is also
-invalid, so the engine holds the last mix rather than sending nothing.
-
-**bpm and scale need a context reset.** Every other parameter steers live. These
-two require `resetContext()`, which is audible as a restart — so the planner is
-instructed to change them only when the event genuinely implies it, and the UI
-says so out loud.
-
-**Audio arrives faster than real time.** The model emits bursts; the scheduler
-buffers ~1.5s and lays chunks end-to-end on the Web Audio clock. On underrun it
-re-anchors ahead of `currentTime` instead of scheduling into the past, which
-would drop chunks silently. Sample rate is parsed from each chunk's MIME type
-rather than hardcoded.
-
-**Setup handshake.** The server rejects client messages sent before
-`setupComplete` arrives, so `connect()` awaits that message.
-
-**Structured output is a flat schema.** `anyOf` unions round-trip poorly through
-`responseSchema`, so the model emits a flat object with a `type` enum and
-`normalize()` narrows it back into the real union, dropping anything malformed.
-
-**The planner translates feeling, not nouns.** A house becomes "shelter, warmth,
-wooden timbres" — not the words "a house". That instruction lives in
-`SYSTEM_INSTRUCTION` in `src/llm/planner.ts` and is the single highest-leverage
-thing to tune.
-
-## Layout
-
-```
-src/
-  core/       types, pure reducer, Gemini response schema  (no I/O — testable)
-  llm/        planner: event + state -> actions
-  audio/      engine interface + capabilities
-              lyria.ts   — hosted WebSocket session
-              magenta.ts — local bridge client
-              mixer.ts   — weight ramping, shared by both
-              scheduler.ts — gapless PCM playback
-  ui/         canvas, track rack, config knobs, action log
-server/       Python WebSocket bridge wrapping Magenta RT2
-test/         reducer + schema tests
-```
-
-## Where to take it
-
-**Tune the planner first.** Nearly all perceived quality lives in
-`SYSTEM_INSTRUCTION`. Add few-shot examples of event → actions for the vocabulary
-you care about.
-
-**Real drawing semantics.** Right now the whole canvas is sent as one image. You
-could send stroke vectors, per-shape events, or spatial position — map the
-x-axis to brightness, the y-axis to density.
-
-**More event sources.** Nothing about the state layer is drawing-specific.
-Gameplay events, sensor data, and scroll position all fit the same
-`event -> actions -> state` pipe.
-
-**Note conditioning.** MRT2 accepts a 128-channel pianoroll that skuzic doesn't
-use. Drawn pitch material is the obvious extension.
-
-### Deploying
-
-Running skuzic locally is safe. **Hosting it on a public website is not, yet:**
-`pnpm build` copies `VITE_GEMINI_API_KEY` into the JavaScript it outputs, so
-anyone who opens the site can read your key and spend your quota.
-
-To host it safely, add a small server that holds the key and sits between the
-browser and Google: it forwards the Lyria WebSocket and the planner calls (or
-hands the browser short-lived tokens instead). Contributions welcome.
-
-Also note Lyria RealTime is an **experimental** Google model — quotas and
-availability can change without notice.
-
-## Stack
-
-React 19 · Vite 8 · TypeScript 7 · pnpm 10 · Tailwind 4 · `@google/genai` 2.13 ·
-`models/lyria-realtime-exp` (v1alpha) · `gemini-3.8-flash` · `magenta-rt` (MLX)
-
-`pnpm.onlyBuiltDependencies` is deliberately empty: the only postinstall scripts
-in the tree are `@google/genai`'s (`echo 'preinstall: no-op'`) and protobufjs's,
-neither of which affects a browser bundle. Build output is byte-identical with
-them skipped.
-
-## Contributing
-
-Bug reports, ideas and PRs are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md)
-for setup and checks, or [open an issue](https://github.com/thisisvaze/skuzic/issues/new/choose).
+- Your key stays on your computer when you run skuzic locally. Don't put a
+  `pnpm build` on a public site yet: the key ends up inside the JavaScript.
+- Lyria RealTime is an experimental Google model, so limits can change.
 
 ## License
 
-[PolyForm Noncommercial 1.0.0](LICENSE.md) © 2026 Aaditya Vaze.
-Free for personal, research and educational use. **Commercial use is not
-permitted.** If you share or build on skuzic, keep the copyright notice and
-credit the project.
+[PolyForm Noncommercial 1.0.0](LICENSE.md) © 2026 Aaditya Vaze. Free for
+personal, research and educational use, but not for commercial use. If you share
+or build on skuzic, keep the copyright notice and give it credit.
