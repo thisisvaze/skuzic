@@ -18,6 +18,7 @@ struct ContentView: View {
     @State private var toastDismiss: Task<Void, Never>?
     @State private var autoInterpretTask: Task<Void, Never>?
     @State private var autoInterpretPending = false
+    @State private var showKeySheet = false
 
     var body: some View {
         ZStack {
@@ -52,7 +53,8 @@ struct ContentView: View {
             TransportBar(
                 panel: $panel,
                 canInterpret: canvas.hasInk,
-                onInterpret: { Task { await interpret() } }
+                onInterpret: { Task { await interpret() } },
+                onNeedKey: { showKeySheet = true }
             )
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                 .padding([.top, .trailing], 16)
@@ -85,6 +87,30 @@ struct ContentView: View {
             }
         }
         .statusBarHidden(true)
+        .sheet(isPresented: $showKeySheet) {
+            NavigationStack {
+                Form {
+                    Section {
+                        ApiKeyEditor {
+                            showKeySheet = false
+                            Task { await store.start() }
+                        }
+                    } footer: {
+                        Text("Get a free key at aistudio.google.com/apikey. It never leaves this device.")
+                    }
+                }
+                .scrollDismissesKeyboard(.interactively)
+                .navigationTitle("API key")
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Close") { showKeySheet = false }
+                    }
+                }
+            }
+            .preferredColorScheme(.dark)
+            .environmentObject(store)
+            .presentationDetents([.medium])
+        }
         .animation(.snappy(duration: 0.22), value: panel)
         .animation(.snappy(duration: 0.28), value: toast?.id)
         .task {
@@ -206,6 +232,7 @@ private struct TransportBar: View {
     @Binding var panel: MixPanel.Tab?
     let canInterpret: Bool
     let onInterpret: () -> Void
+    let onNeedKey: () -> Void
 
     @State private var showLog = false
 
@@ -256,9 +283,15 @@ private struct TransportBar: View {
                 .foregroundStyle(.white.opacity(0.6))
             } else {
                 Button {
-                    Task { await store.start() }
+                    if store.hasKey {
+                        Task { await store.start() }
+                    } else {
+                        onNeedKey()
+                    }
                 } label: {
-                    Text(store.status == .connecting ? "starting…" : "start")
+                    Text(store.status == .connecting
+                         ? "starting…"
+                         : store.hasKey ? "start" : "add key")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(.black)
                         .padding(.horizontal, 14)
@@ -266,7 +299,7 @@ private struct TransportBar: View {
                         .background(Capsule().fill(.white))
                 }
                 .buttonStyle(.plain)
-                .disabled(store.status == .connecting || !store.hasKey)
+                .disabled(store.status == .connecting)
             }
 
             Divider().frame(height: 18).overlay(.white.opacity(0.15))

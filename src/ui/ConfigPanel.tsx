@@ -20,6 +20,7 @@ import {
   type PlannerConfigId,
 } from '../llm/configs';
 import { PLANNER_MODELS, type PlannerModel } from '../llm/planner';
+import { ApiKeyField } from './ApiKeyField';
 
 interface Props {
   config: MixConfig;
@@ -41,6 +42,9 @@ interface Props {
   onPlannerModelChange: (model: PlannerModel) => void;
   plannerConfig: PlannerConfigId;
   onPlannerConfigChange: (config: PlannerConfigId) => void;
+  apiKey: string;
+  onApiKeyChange: (key: string) => void;
+  onApiKeyCommit?: (key: string) => void;
 }
 
 const SCALE_LABELS: Record<string, string> = {
@@ -173,6 +177,9 @@ export function ConfigPanel({
   onPlannerModelChange,
   plannerConfig,
   onPlannerConfigChange,
+  apiKey,
+  onApiKeyChange,
+  onApiKeyCommit,
 }: Props) {
   const set = (patch: Partial<MixConfig>) => dispatch({ type: 'SET_CONFIG', config: patch });
 
@@ -188,6 +195,9 @@ export function ConfigPanel({
   return (
     <div className="grid grid-cols-1 items-start gap-x-7 gap-y-6 sm:grid-cols-2 lg:grid-cols-3">
       <Section title="model">
+        <Field label="Gemini API key">
+          <ApiKeyField value={apiKey} onChange={onApiKeyChange} onCommit={onApiKeyCommit} />
+        </Field>
         <Field label="music model">
           <Select
             value={backend}

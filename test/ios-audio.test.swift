@@ -284,14 +284,16 @@ private struct AudioTests {
         try? await Task.sleep(nanoseconds: 30_000_000)
         let afterClose = await sent.values
         check(afterClose == recorded, "closing prevents queued or late commands being sent")
-        let cancelled = SendRecorder()
+        let cancelled = SendRecorder(holdNanoseconds: 2_000_000_000)
         let cancelledOutbox = LyriaOutbox(send: { try await cancelled.send($0) },
                                          failed: { _ in failures += 1 })
         cancelledOutbox.enqueue("in-flight")
         cancelledOutbox.enqueue("must-not-send")
-        try? await Task.sleep(nanoseconds: 2_000_000)
+        let started = await cancelled.waitUntilActive()
+        check(started, "in-flight send has started before cancel")
         cancelledOutbox.cancel()
-        try? await Task.sleep(nanoseconds: 30_000_000)
+        let idle = await cancelled.waitUntilIdle()
+        check(idle, "cancelled send has finished tearing down")
         let afterCancellation = await cancelled.values
         check(afterCancellation.isEmpty && failures == 0,
               "cancelling an in-flight send drops its tail without a stale failure callback")
@@ -338,11 +340,35 @@ private actor SendRecorder {
     private(set) var values: [String] = []
     private var active = 0
     private(set) var maximumActive = 0
+    private let holdNanoseconds: UInt64
+
+    init(holdNanoseconds: UInt64 = 10_000_000) {
+        self.holdNanoseconds = holdNanoseconds
+    }
+
+    func waitUntilActive(timeout: TimeInterval = 2) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if active > 0 { return true }
+            try? await Task.sleep(nanoseconds: 1_000_000)
+        }
+        return false
+    }
+
+    func waitUntilIdle(timeout: TimeInterval = 2) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if active == 0 { return true }
+            try? await Task.sleep(nanoseconds: 1_000_000)
+        }
+        return false
+    }
+
     func send(_ text: String) async throws {
         active += 1
         maximumActive = max(maximumActive, active)
         defer { active -= 1 }
-        try await Task.sleep(nanoseconds: 10_000_000)
+        try await Task.sleep(nanoseconds: holdNanoseconds)
         values.append(text)
     }
 }

@@ -69,17 +69,19 @@ final class SkuzicStore: ObservableObject {
 
     /// Band energies for the equalizer meter.
     func levels(bands: Int) -> [Float]? { engine.levels(bands: bands) }
-    var hasKey: Bool { !Secrets.geminiAPIKey.isEmpty }
+    @Published private(set) var hasKey = false
 
-    init(apiKey: String) {
+    init() {
         Diagnostics.event(.session, "DIAGNOSTICS_READY version=2 health_interval_s=2")
+        let key = Preferences.apiKey
+        hasKey = !key.isEmpty
         let model = Preferences.string(.plannerModel).flatMap(PlannerModel.init(rawValue:))
             ?? .default
         let config = Preferences.string(.plannerConfig).flatMap(PlannerConfig.init(rawValue:))
             ?? .default
 
-        engine = LyriaEngine(apiKey: apiKey)
-        planner = Planner(apiKey: apiKey, model: model, config: config)
+        engine = LyriaEngine(apiKey: key)
+        planner = Planner(apiKey: key, model: model, config: config)
         // Assigned after `planner` exists so the didSet above is a no-op here
         // rather than writing back the value we just read.
         plannerModel = model
@@ -93,6 +95,16 @@ final class SkuzicStore: ObservableObject {
         engine.onFilteredPrompt = { [weak self] text, reason in
             self?.push(LogEntry(id: 0, event: "prompt filtered", error: "“\(text)” — \(reason)"))
         }
+    }
+
+    func setApiKey(_ raw: String) {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let changed = trimmed != Preferences.apiKey
+        Preferences.apiKey = trimmed
+        hasKey = !trimmed.isEmpty
+        planner.apiKey = trimmed
+        engine.setApiKey(trimmed)
+        if changed, connected { stop() }
     }
 
     // MARK: - Sketch session
@@ -124,10 +136,7 @@ final class SkuzicStore: ObservableObject {
 
     func start() async {
         guard !connected else { return }
-        guard hasKey else {
-            push(LogEntry(id: 0, event: "start", error: EngineError.missingKey.localizedDescription))
-            return
-        }
+        guard hasKey else { return }
 
         do {
             engine.setConfig(state.config)

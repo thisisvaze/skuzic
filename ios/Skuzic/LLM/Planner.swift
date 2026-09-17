@@ -200,7 +200,7 @@ enum PlannerError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .missingKey:
-            return "No Gemini API key. Add VITE_GEMINI_API_KEY to .env and re-run scripts/gen-secrets.sh."
+            return "No Gemini API key. Add one in Settings."
         case let .http(code, body):
             // The two that actually happen in normal use, named rather than left
             // as a bare number the reader has to go look up mid-session.
@@ -238,7 +238,7 @@ enum PlannerModel: String, CaseIterable, Identifiable {
 }
 
 struct Planner {
-    let apiKey: String
+    var apiKey: String
     /// Per call rather than baked in, so the picker takes effect on the next
     /// tap instead of the next launch.
     var model: PlannerModel = .default

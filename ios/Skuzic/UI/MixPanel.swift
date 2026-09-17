@@ -224,6 +224,10 @@ struct MixPanel: View {
     @ViewBuilder private var engineTab: some View {
         let config = store.state.config
 
+        ApiKeyEditor()
+
+        Divider().overlay(.white.opacity(0.1)).padding(.vertical, 4)
+
         knob("bpm", value: Double(config.bpm), range: 60...200, display: "\(config.bpm)") {
             store.dispatch(.setConfig(ConfigPatch(bpm: Int($0))))
         }

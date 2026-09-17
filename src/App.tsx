@@ -33,21 +33,13 @@ import {
 } from './llm/planner';
 import { AbChoice } from './ui/AbChoice';
 import { ActionLog, type LogEntry } from './ui/ActionLog';
+import { ApiKeyField } from './ui/ApiKeyField';
 import { ConfigPanel } from './ui/ConfigPanel';
 import { DrawCanvas, type CanvasHandle } from './ui/DrawCanvas';
 import { TrackRack } from './ui/TrackRack';
 
 const BRIDGE_URL =
   (import.meta.env.VITE_MAGENTA_BRIDGE_URL as string | undefined) || DEFAULT_BRIDGE_URL;
-
-const API_KEY = (import.meta.env.VITE_GEMINI_API_KEY as string | undefined) || '';
-
-/**
- * Optional second key for A/B mode. One key gets one smoothly-generating Lyria
- * session, so instant switching needs the B arm on its own key. Unset, A/B
- * still works — switching just cuts the single stream instead.
- */
-const API_KEY_B = (import.meta.env.VITE_GEMINI_API_KEY_B as string | undefined) || '';
 
 /** A stored backend from an older build may name one that no longer exists. */
 function loadBackend(fallback: Backend): Backend {
@@ -126,10 +118,9 @@ export default function App() {
   /** Which pending variant the engine is playing right now. */
   const [abAudition, setAbAudition] = useState(0);
   /**
-   * The second stream (on API_KEY_B) that makes A/B switching instant.
-   * 'warming' while it connects and buffers, 'ready' once switching is a pure
-   * gain flip, 'failed' when it couldn't start or starved — switching then
-   * falls back to cutting the one main stream.
+   * The second stream that makes A/B switching instant. Needs its own Gemini
+   * key (two Lyria sessions on one key contend), which we don't collect, so
+   * this stays 'off' and switching cuts the single stream.
    */
   const [auditionMode, setAuditionMode] = useState<'off' | 'warming' | 'ready' | 'failed'>('off');
   const [datasetCount, setDatasetCount] = useState(0);
@@ -141,6 +132,16 @@ export default function App() {
     const saved = load(KEYS.plannerConfig, DEFAULT_PLANNER_CONFIG);
     return saved in PLANNER_CONFIGS ? (saved as PlannerConfigId) : DEFAULT_PLANNER_CONFIG;
   });
+  const [apiKey, setApiKey] = useState(() => load(KEYS.apiKey, ''));
+  const apiKeyRef = useRef(apiKey);
+  apiKeyRef.current = apiKey;
+
+  const commitKey = (value: string) => {
+    const trimmed = value.trim();
+    apiKeyRef.current = trimmed;
+    setApiKey(trimmed);
+    save(KEYS.apiKey, trimmed);
+  };
 
   const engineRef = useRef<MusicEngine | null>(null);
   /** The muted second stream playing variant B during an A/B choice. */
@@ -303,9 +304,9 @@ export default function App() {
   // model — runPlan compares identity and discards it, which is the right call
   // since it was planned against a model the user just moved off.
   useEffect(() => {
-    if (plannerRef.current) plannerRef.current = createPlanner(API_KEY, plannerModel);
+    if (plannerRef.current) plannerRef.current = createPlanner(apiKeyRef.current, plannerModel);
     if (plannerBRef.current)
-      plannerBRef.current = createPlanner(API_KEY_B || API_KEY, plannerModel);
+      plannerBRef.current = createPlanner(apiKeyRef.current, plannerModel);
   }, [plannerModel]);
 
   useEffect(
@@ -402,59 +403,18 @@ export default function App() {
   );
 
   /**
-   * Start the second stream for variant B, muted, so both A/B arms generate at
-   * once and switching between them is instant. Runs on its own API key —
-   * empirically, two sessions on one key contend for generation — and only for
-   * Lyria: the local Magenta bridge runs one model, one session.
+   * Dual-stream A/B needs a second Gemini key (two Lyria sessions on one key
+   * contend). We only collect one, so switching cuts the single stream.
    */
-  const spawnAudition = useCallback(
-    async (next: SkuzicState) => {
-      if (stateRef.current.backend !== 'lyria' || !API_KEY_B) return;
-
-      const box: { engine: MusicEngine | null } = { engine: null };
-      const engine: MusicEngine = new LyriaEngine(API_KEY_B, makeEvents(box));
-      box.engine = engine;
-      auditionEngineRef.current = engine;
-      abBufferRef.current = 0;
-      setAuditionMode('warming');
-
-      try {
-        // Muted before connect so the scheduler is born silent.
-        engine.setMasterVolume(0);
-        await engine.connect();
-        // The choice may already be over — a keep or dismiss nulls the ref.
-        if (auditionEngineRef.current !== engine) {
-          void engine.close();
-          return;
-        }
-        await engine.setConfig(next.config);
-        if (auditionEngineRef.current !== engine) {
-          void engine.close();
-          return;
-        }
-        const live = next.tracks.filter((t) => !t.muted && t.volume > 0);
-        engine.setPrompts(live.map((t) => ({ text: t.prompt, weight: t.volume })));
-        // Streams into its own buffer, silently; onBuffer flips mode to ready.
-        engine.play();
-      } catch (error) {
-        if (auditionEngineRef.current === engine) {
-          auditionEngineRef.current = null;
-          setAuditionMode('failed');
-          pushLog({
-            event: 'A/B second stream failed — switching falls back to a cut',
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
-        void engine.close();
-      }
-    },
-    [makeEvents, pushLog],
-  );
+  const spawnAudition = useCallback(async (_next: SkuzicState) => {
+    void _next;
+  }, []);
 
   // ---- transport -----------------------------------------------------------
 
   const start = async (backend: Backend = stateRef.current.backend) => {
-    if (!API_KEY) return;
+    const key = apiKeyRef.current;
+    if (!key) return;
 
     // engineRef outlives the engine. A stream that closes or errors reports it
     // through the status callbacks rather than by throwing, so `catch` never
@@ -470,14 +430,14 @@ export default function App() {
     const box: { engine: MusicEngine | null } = { engine: null };
     const engine: MusicEngine =
       backend === 'lyria'
-        ? new LyriaEngine(API_KEY, makeEvents(box))
+        ? new LyriaEngine(key, makeEvents(box))
         : new MagentaEngine(BRIDGE_URL, makeEvents(box));
     box.engine = engine;
 
     engineRef.current = engine;
     // The planner always runs on Gemini, whichever backend makes the audio.
-    plannerRef.current = createPlanner(API_KEY, plannerModel);
-    plannerBRef.current = createPlanner(API_KEY_B || API_KEY, plannerModel);
+    plannerRef.current = createPlanner(key, plannerModel);
+    plannerBRef.current = createPlanner(key, plannerModel);
 
     try {
       await engine.connect();
@@ -559,7 +519,7 @@ export default function App() {
   // Same as iOS: connect as soon as the page loads so drawing later does not
   // need another Start tap. Playback still waits for ink + a live mix.
   useEffect(() => {
-    if (!API_KEY) return;
+    if (!apiKeyRef.current) return;
     void start();
     // Intentionally once on mount — start() is re-entered via the overlay after stop.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1020,6 +980,18 @@ export default function App() {
                         setPlannerConfig(c);
                         save(KEYS.plannerConfig, c);
                       }}
+                      apiKey={apiKey}
+                      onApiKeyChange={setApiKey}
+                      onApiKeyCommit={(key) => {
+                        const trimmed = key.trim();
+                        if (trimmed === load(KEYS.apiKey, '')) return;
+                        commitKey(trimmed);
+                        if (engineRef.current) {
+                          void stop().then(() => {
+                            if (trimmed) void start();
+                          });
+                        }
+                      }}
                     />
                   </div>
                 </div>
@@ -1100,16 +1072,26 @@ export default function App() {
             getLevels={getLevels}
             interpretDisabled={!connected || !!pendingAb}
             showStart={!connected}
-            onStart={() => void start()}
-            startDisabled={!API_KEY || status === 'connecting'}
+            onStart={() => {
+              commitKey(apiKey);
+              void start();
+            }}
+            startDisabled={!apiKey.trim() || status === 'connecting'}
             startTitle={
-              !API_KEY
-                ? 'Set VITE_GEMINI_API_KEY in .env'
+              !apiKey.trim()
+                ? 'Paste a Gemini API key to start'
                 : status === 'connecting'
                   ? 'connecting…'
                   : status === 'error'
                     ? statusDetail || 'retry'
                     : 'start'
+            }
+            startExtras={
+              <ApiKeyField
+                className="w-72 max-w-full text-left [&_a]:text-[#5c574e]"
+                value={apiKey}
+                onChange={setApiKey}
+              />
             }
             onInterpret={() => trigger('Recognized Input Update', true)}
             onAutoInterpret={() => queueAutoPlan('Recognized Input Update', true)}

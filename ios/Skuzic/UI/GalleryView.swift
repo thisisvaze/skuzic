@@ -4,10 +4,12 @@ import SwiftUI
 /// tile leading. Tapping a card opens the editor and resumes its music.
 struct GalleryView: View {
     @EnvironmentObject private var sketches: SketchStore
+    @EnvironmentObject private var store: SkuzicStore
     @Binding var open: SketchMeta?
 
     @State private var renaming: SketchMeta?
     @State private var draftTitle = ""
+    @State private var showSettings = false
 
     private let columns = [GridItem(.adaptive(minimum: 210, maximum: 300), spacing: 22)]
 
@@ -42,6 +44,27 @@ struct GalleryView: View {
             .safeAreaInset(edge: .top) { header }
         }
         .statusBarHidden(true)
+        .sheet(isPresented: $showSettings) {
+            NavigationStack {
+                Form {
+                    Section {
+                        ApiKeyEditor()
+                    } footer: {
+                        Text("Get a free key at aistudio.google.com/apikey. It never leaves this device.")
+                    }
+                }
+                .scrollDismissesKeyboard(.interactively)
+                .navigationTitle("Settings")
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { showSettings = false }
+                    }
+                }
+            }
+            .preferredColorScheme(.dark)
+            .environmentObject(store)
+            .presentationDetents([.medium])
+        }
         .alert("Rename sketch", isPresented: .constant(renaming != nil)) {
             TextField("Title", text: $draftTitle)
             Button("Cancel", role: .cancel) { renaming = nil }
@@ -62,6 +85,17 @@ struct GalleryView: View {
                 .foregroundStyle(.white.opacity(0.35))
 
             Spacer()
+
+            Button {
+                showSettings = true
+            } label: {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 16, weight: .semibold))
+                    .frame(width: 40, height: 34)
+                    .foregroundStyle(.white.opacity(0.7))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Settings")
 
             Button {
                 open = sketches.create()

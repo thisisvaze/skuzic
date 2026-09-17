@@ -10,7 +10,7 @@ enum EngineError: LocalizedError {
     case disconnected(String)
     var errorDescription: String? {
         switch self {
-        case .missingKey: return "No Gemini API key. Run ios/scripts/gen-secrets.sh after configuring .env."
+        case .missingKey: return "No Gemini API key. Add one in Settings."
         case .timedOut: return "Lyria did not complete setup in time."
         case .invalidAudio: return "Lyria sent an unsupported audio format."
         case .bufferOverflow: return "The music stream exceeded the audio buffer limit."
@@ -30,7 +30,7 @@ final class LyriaEngine: ObservableObject {
     @Published private(set) var playbackRequested = false
     var onFilteredPrompt: ((String, String) -> Void)?
 
-    private let apiKey: String
+    private var apiKey: String
     private var connection: LyriaConnection?
     private var scheduler: PcmScheduler?
     private var connectTask: Task<Void, Error>?
@@ -51,6 +51,8 @@ final class LyriaEngine: ObservableObject {
     private lazy var mixer = PromptMixer { [weak self] weights in self?.sendPrompts(weights) }
 
     init(apiKey: String) { self.apiKey = apiKey }
+
+    func setApiKey(_ key: String) { apiKey = key }
 
     func connect() async throws {
         if let connectTask { return try await connectTask.value }

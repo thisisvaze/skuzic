@@ -37,8 +37,8 @@ unaware of which is running.
 
 Magenta requires the local bridge in [`server/`](../server/README.md). MRT2 ships
 no server component, so that wraps its Python API in a WebSocket. **The Gemini
-key is needed either way**: the planner always runs on Gemini, whichever model
-generates audio.
+key is needed either way** (pasted in the UI): the planner always runs on Gemini,
+whichever model generates audio.
 
 The control surfaces really differ: MRT2 conditions on blended MusicCoCa
 style embeddings and has no concept of tempo or key. Rather than let dead knobs
@@ -97,13 +97,10 @@ the arm being auditioned (read-only) rather than the on-hold committed mix.
 Which strategy produced which is only revealed in the action log after the
 choice, so the ear decides rather than the label.
 
-With `VITE_GEMINI_API_KEY_B` set, arm B runs on a second, muted Lyria stream
-under its own key, and *listen* is a pure gain flip: instant switching between
-two complete performances; *keep B* promotes that stream to main so the winner
-never skips. A watchdog watches the audible arm's buffer and quietly falls back
-to single-stream if it starves. Without a B key (or on Magenta: one local
-model, one session), switching re-steers the single stream with a
-`resetContext`, landing as a ducked cut in about a second.
+The Gemini key is entered in the UI and stored locally (localStorage / Keychain).
+A/B still works on one key: switching re-steers the single stream with a
+`resetContext`, landing as a ducked cut in about a second. Dual-stream instant
+switching would need a second key, which we don't collect.
 
 Every choice is saved to IndexedDB as a preference record: the drawing as the
 planner saw it, the event, the mix both plans started from, both full plans

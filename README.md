@@ -23,11 +23,15 @@ audio locally with Google's open Magenta RT2 model.
 
 ```bash
 pnpm install
-cp .env.example .env   # paste a key from aistudio.google.com/apikey
 pnpm dev
 ```
 
-Open http://localhost:5173, hit **start**, and draw.
+Open http://localhost:5173, paste a Gemini key from
+[aistudio.google.com/apikey](https://aistudio.google.com/apikey), hit **start**,
+and draw. The key stays in your browser; it is never baked into the build.
+
+On iPad/iPhone: open `ios/Skuzic.xcodeproj`, run, then **Settings** (gear) and
+paste the same kind of key. It lives in the Keychain, not the app binary.
 
 ## Build it with us
 
@@ -41,8 +45,8 @@ skuzic is early and there's a lot of fun stuff left to make:
   today. Lines could become tunes.
 - 🎮 **Play it with anything.** Game events, sensors, scrolling. If it can say
   "something happened", it can make music.
-- 🌍 **Put it online.** A tiny server that holds the API key would let anyone
-  play skuzic in their browser.
+- 🌍 **Put it online.** The web app is static files; visitors paste their own
+  key. A tiny proxy that holds a shared key would let anyone play without one.
 
 Grab a [good first issue](https://github.com/thisisvaze/skuzic/labels/good%20first%20issue),
 [share an idea](https://github.com/thisisvaze/skuzic/issues/new/choose), or read
@@ -51,8 +55,9 @@ hood? See [docs/how-it-works.md](docs/how-it-works.md).
 
 ## Good to know
 
-- Your key stays on your computer when you run skuzic locally. Don't put a
-  `pnpm build` on a public site yet: the key ends up inside the JavaScript.
+- Your Gemini key stays in the browser (web) or the Keychain (iOS). It is not
+  in the repo or the shipped binary. A public `pnpm build` is fine: each visitor
+  pastes their own key.
 - Lyria RealTime is an experimental Google model, so limits can change.
 
 ## License

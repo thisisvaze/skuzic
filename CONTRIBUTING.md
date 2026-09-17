@@ -22,16 +22,19 @@ you spend time on it.
 
 ```bash
 pnpm install
-cp .env.example .env      # add a Gemini key from https://aistudio.google.com/apikey
 pnpm dev
 ```
 
+Paste a Gemini key from https://aistudio.google.com/apikey into the start
+overlay (or Engine → Gemini API key). It is stored in localStorage.
+
 ### iOS
 
-1. Add your key to `.env` (same as web), then run `sh ios/scripts/gen-secrets.sh`
-2. Open `ios/Skuzic.xcodeproj`
-3. In *Signing & Capabilities*, pick your own team and change the bundle
+1. Open `ios/Skuzic.xcodeproj`
+2. In *Signing & Capabilities*, pick your own team and change the bundle
    identifier. Don't commit those changes.
+3. Run, then **Settings** (gear on the gallery, or Engine on a sketch) and
+   paste your Gemini key. It is stored in the Keychain.
 
 ### Magenta RT2 (optional, Apple Silicon)
 
@@ -49,8 +52,8 @@ CI runs the same checks.
 
 - Keep PRs focused: one fix or feature each.
 - Say how you tested it. For audio changes, say what you listened for.
-- **Never commit API keys.** `.env` and `ios/Skuzic/App/Secrets.swift` are
-  gitignored; keep it that way.
+- **Never commit API keys.** `.env` is gitignored; keys belong in the browser
+  (localStorage) or the iOS Keychain, not in source.
 
 ## License of contributions
 

@@ -3,6 +3,7 @@
 Please report vulnerabilities privately through GitHub:
 **Security tab → Report a vulnerability**. Don't open a public issue.
 
-Known by design: skuzic is a prototype that runs your Gemini key in the
-browser (web) or bakes it into the app binary (iOS). Don't deploy either
-publicly with a real key. See [Good to know](README.md#good-to-know).
+Known by design: the Gemini key is entered by each user and stored in
+localStorage (web) or the Keychain (iOS). The client still sends that key to
+Google. Don't put a shared production key in the app. See
+[Good to know](README.md#good-to-know).

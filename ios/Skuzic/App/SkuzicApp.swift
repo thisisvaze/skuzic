@@ -2,7 +2,7 @@ import SwiftUI
 
 @main
 struct SkuzicApp: App {
-    @StateObject private var store = SkuzicStore(apiKey: Secrets.geminiAPIKey)
+    @StateObject private var store = SkuzicStore()
     @StateObject private var sketches = SketchStore()
     @Environment(\.scenePhase) private var scenePhase
 

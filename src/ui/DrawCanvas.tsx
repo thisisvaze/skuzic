@@ -4,6 +4,7 @@ import {
   useImperativeHandle,
   useRef,
   useState,
+  type ReactNode,
 } from 'react';
 import { Droplet, Eraser, Loader2, Play, Redo2, Trash2, Undo2 } from 'lucide-react';
 import getStroke from 'perfect-freehand';
@@ -304,6 +305,7 @@ interface Props {
   onStart?: () => void;
   startDisabled?: boolean;
   startTitle?: string;
+  startExtras?: ReactNode;
 }
 
 /**
@@ -324,6 +326,7 @@ export const DrawCanvas = forwardRef<CanvasHandle, Props>(function DrawCanvas(
     onStart,
     startDisabled,
     startTitle,
+    startExtras,
   },
   ref,
 ) {
@@ -737,7 +740,8 @@ export const DrawCanvas = forwardRef<CanvasHandle, Props>(function DrawCanvas(
           </div>
         )}
         {showStart && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-[#f4f1ea]/35">
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-[#f4f1ea]/35 px-6">
+            {startExtras}
             <Button
               type="button"
               size="icon"
