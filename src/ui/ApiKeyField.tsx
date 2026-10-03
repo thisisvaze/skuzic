@@ -4,11 +4,13 @@ const STUDIO = 'https://aistudio.google.com/apikey';
 
 /** Paste-your-own Gemini key. Stays in localStorage; never baked into the bundle. */
 export function ApiKeyField({
+  id,
   value,
   onChange,
   onCommit,
   className,
 }: {
+  id?: string;
   value: string;
   onChange: (value: string) => void;
   onCommit?: (value: string) => void;
@@ -17,6 +19,7 @@ export function ApiKeyField({
   return (
     <div className={className}>
       <Input
+        id={id}
         type="password"
         autoComplete="off"
         spellCheck={false}

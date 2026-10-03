@@ -6,8 +6,9 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { Droplet, Eraser, Loader2, Play, Redo2, Trash2, Undo2 } from 'lucide-react';
+import { AudioLines, Droplet, Eraser, Play, Redo2, Trash2, Undo2 } from 'lucide-react';
 import getStroke from 'perfect-freehand';
+import { TouchEngine, prefetchPenSounds } from '@/audio/touch';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import { cn } from '@/lib/utils';
@@ -17,7 +18,7 @@ import { KEYS, load, save } from '@/lib/persist';
 const EXPORT_MAX_EDGE = 640;
 const EXPORT_QUALITY = 0.8;
 
-const PAPER = '#f4f1ea';
+const PAPER = '#fcfbf8';
 
 /** Picked to stay legible against the paper fill once the model downsamples it. */
 const COLORS = [
@@ -77,6 +78,9 @@ const GRAIN_FLOOR = 0.42;
 /** Below 1 so overlapping passes build up, the way graphite actually darkens. */
 const INK_ALPHA = 0.88;
 
+/** From this nib size up, the paper sounds like a marker rather than a pencil. */
+const MARKER_SIZE = 14;
+
 /** Bounded so a long session can't grow the history without limit. */
 const MAX_HISTORY = 200;
 
@@ -86,83 +90,9 @@ const MAX_HISTORY = 200;
  * than a ring on swatches and a pill on icons.
  */
 const TOOL_CELL =
-  'grid size-9 place-items-center rounded-md outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/60';
+  'grid size-9 place-items-center rounded-full outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/60';
 const TOOL_ON = 'bg-accent text-foreground';
 const TOOL_OFF = 'text-muted-foreground hover:bg-secondary hover:text-foreground';
-
-/** Resting pose when silent — still an equalizer glyph, just not moving. */
-const EQ_REST = [0.45, 0.8, 0.6, 0.35];
-const EQ_FLOOR = 0.16;
-/** Meters look wrong with symmetric smoothing: level should jump and then sag,
- *  so attack is near-instant and release is slow. */
-const EQ_ATTACK = 0.55;
-const EQ_RELEASE = 0.12;
-
-/**
- * Bars follow the actual spectrum. Levels are written straight to the DOM in a
- * rAF loop rather than through state — this runs at display rate, and putting
- * it through React would re-render the whole canvas tree 60 times a second.
- */
-function Equalizer({
-  animated,
-  getLevels,
-}: {
-  animated?: boolean;
-  getLevels?: (bands: number) => number[] | null;
-}) {
-  const bars = useRef<(HTMLSpanElement | null)[]>([]);
-
-  useEffect(() => {
-    const apply = (values: number[]) =>
-      values.forEach((v, i) => {
-        const el = bars.current[i];
-        if (el) el.style.transform = `scaleY(${EQ_FLOOR + v * (1 - EQ_FLOOR)})`;
-      });
-
-    if (!animated || !getLevels) {
-      apply(EQ_REST);
-      return;
-    }
-    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
-      apply(EQ_REST);
-      return;
-    }
-
-    const smoothed = [...EQ_REST];
-    let raf = 0;
-
-    const tick = () => {
-      const levels = getLevels(EQ_REST.length);
-      if (levels) {
-        for (let i = 0; i < smoothed.length; i++) {
-          const target = levels[i] ?? 0;
-          const k = target > smoothed[i] ? EQ_ATTACK : EQ_RELEASE;
-          smoothed[i] += (target - smoothed[i]) * k;
-        }
-        apply(smoothed);
-      }
-      raf = requestAnimationFrame(tick);
-    };
-
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [animated, getLevels]);
-
-  return (
-    <span className="flex h-4 items-center gap-[2.5px]" aria-hidden="true">
-      {EQ_REST.map((rest, i) => (
-        <span
-          key={i}
-          ref={(el) => {
-            bars.current[i] = el;
-          }}
-          className="h-full w-[2.5px] origin-center rounded-full bg-current"
-          style={{ transform: `scaleY(${EQ_FLOOR + rest * (1 - EQ_FLOOR)})` }}
-        />
-      ))}
-    </span>
-  );
-}
 
 const MOD =
   typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl+';
@@ -280,24 +210,23 @@ export interface CanvasHandle {
   isEmpty: () => boolean;
   undo: () => void;
   redo: () => void;
+  /** The music changed scene: the pen answers right away, before the band follows. */
+  cue: (bright?: boolean) => void;
 }
 
 interface Props {
-  /** Explicit request — the sparkle button. Runs immediately. */
-  onInterpret?: () => void;
   /**
    * Fired when the pad changes on its own (stroke finished, undo, redo) while
-   * auto-interpret is on. The parent debounces this, so a burst of strokes
-   * costs one plan rather than one per stroke.
+   * auto-interpret is on. The parent reads the page with SigLIP and collapses a
+   * burst of strokes into one read.
    */
   onAutoInterpret?: () => void;
   /** Fired after clearing the pad when auto-interpret is on. */
   onClearInterpret?: () => void;
   interpretDisabled?: boolean;
-  interpreting?: boolean;
-  /** Drives the equalizer icon — it should only move while audio is running. */
+  /** The sheet only glows while audio is actually running. */
   playing?: boolean;
-  /** Live spectrum for the equalizer icon. */
+  /** Live spectrum the glow follows. */
   getLevels?: (bands: number) => number[] | null;
   autoInterpret?: boolean;
   /** Idle gate — fades the pad and shows a centered start control. */
@@ -314,11 +243,9 @@ interface Props {
  */
 export const DrawCanvas = forwardRef<CanvasHandle, Props>(function DrawCanvas(
   {
-    onInterpret,
     onAutoInterpret,
     onClearInterpret,
     interpretDisabled,
-    interpreting,
     playing,
     getLevels,
     autoInterpret,
@@ -347,6 +274,30 @@ export const DrawCanvas = forwardRef<CanvasHandle, Props>(function DrawCanvas(
   useEffect(() => {
     save(KEYS.brushOpacity, brushOpacity);
   }, [brushOpacity]);
+
+  /** The pen's own sound. Built on the first stroke, inside that gesture, so the browser lets it play. */
+  const touch = useRef<TouchEngine | null>(null);
+  // The piano downloads while the page settles, so the first stroke can already sing.
+  useEffect(() => {
+    prefetchPenSounds().catch(() => {});
+  }, []);
+  // Read through a ref: the engine outlives renders and should always hear the current band.
+  const levelsRef = useRef(getLevels);
+  levelsRef.current = getLevels;
+  const [paperSound, setPaperSound] = useState(() => load(KEYS.paperSound, true));
+  useEffect(() => {
+    save(KEYS.paperSound, paperSound);
+    // Switching off mid-stroke lets that stroke ring out instead of carrying on.
+    if (!paperSound) touch.current?.up();
+  }, [paperSound]);
+  // Nulled as well as closed: StrictMode remounts, and a closed context can't be reused.
+  useEffect(
+    () => () => {
+      touch.current?.close();
+      touch.current = null;
+    },
+    [],
+  );
 
   const past = useRef<Entry[]>([]);
   const future = useRef<Entry[]>([]);
@@ -514,9 +465,10 @@ export const DrawCanvas = forwardRef<CanvasHandle, Props>(function DrawCanvas(
   /** Clearing from the toolbar also has to tell the planner the page is blank. */
   const clearFromToolbar = () => {
     const hadInk = dirty.current;
+    if (hadInk) touch.current?.clear();
     clearPad();
     if (hadInk && canAutoInterpret()) {
-      (onClearInterpret ?? onAutoInterpret ?? onInterpret)?.();
+      (onClearInterpret ?? onAutoInterpret)?.();
     }
   };
 
@@ -617,6 +569,7 @@ export const DrawCanvas = forwardRef<CanvasHandle, Props>(function DrawCanvas(
     isEmpty: () => !dirty.current,
     undo,
     redo,
+    cue: (bright) => touch.current?.cue(bright),
   }));
 
   const pos = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -650,6 +603,18 @@ export const DrawCanvas = forwardRef<CanvasHandle, Props>(function DrawCanvas(
       erasing,
       simulate: e.pointerType !== 'pen',
     };
+    if (paperSound) {
+      if (!touch.current) {
+        touch.current = new TouchEngine();
+        touch.current.listen(() => {
+          const bands = levelsRef.current?.(4);
+          return bands?.length ? bands.reduce((a, b) => a + b, 0) / bands.length : 0;
+        });
+      }
+      const { width, height } = e.currentTarget.getBoundingClientRect();
+      const tool = erasing ? 'eraser' : brushSize >= MARKER_SIZE ? 'marker' : 'pencil';
+      touch.current.down(x, y, pressure, e.timeStamp, width, height, tool, brushOpacity);
+    }
     present();
   };
 
@@ -663,24 +628,26 @@ export const DrawCanvas = forwardRef<CanvasHandle, Props>(function DrawCanvas(
     const samples = raw.length ? raw : [e.nativeEvent];
     const rect = e.currentTarget.getBoundingClientRect();
     for (const sample of samples) {
-      stroke.current.points.push([
-        sample.clientX - rect.left,
-        sample.clientY - rect.top,
-        sample.pressure || 0.5,
-      ]);
+      const x = sample.clientX - rect.left;
+      const y = sample.clientY - rect.top;
+      const pressure = sample.pressure || 0.5;
+      stroke.current.points.push([x, y, pressure]);
+      // Every coalesced sample, with its own timestamp: speed comes from these.
+      touch.current?.move(x, y, pressure, sample.timeStamp);
     }
     present();
   };
 
-  // `interpreting` is deliberately not part of this test. The parent coalesces
-  // overlapping requests, so a stroke drawn while a plan is in flight still has
-  // to register — otherwise the pad the user ends on never gets interpreted.
+  // A read in flight is deliberately not part of this test. The parent coalesces
+  // overlapping reads, so a stroke drawn mid-read still has to register —
+  // otherwise the page the user ends on never gets read.
   const canAutoInterpret = () =>
-    !!autoInterpret && !interpretDisabled && !!(onAutoInterpret ?? onInterpret);
+    !!autoInterpret && !interpretDisabled && !!onAutoInterpret;
 
   const up = () => {
     if (!drawing.current) return;
     drawing.current = false;
+    touch.current?.up();
     const finished = stroke.current;
     stroke.current = null;
     if (finished) {
@@ -690,7 +657,7 @@ export const DrawCanvas = forwardRef<CanvasHandle, Props>(function DrawCanvas(
       if (ctx) paintStroke(ctx, finished);
       present();
     }
-    if (canAutoInterpret() && dirty.current) (onAutoInterpret ?? onInterpret)?.();
+    if (canAutoInterpret() && dirty.current) onAutoInterpret?.();
   };
 
   // Cmd/Ctrl+Z undoes, Cmd+Shift+Z or Ctrl+Y redoes — but never while the user
@@ -720,84 +687,123 @@ export const DrawCanvas = forwardRef<CanvasHandle, Props>(function DrawCanvas(
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  // The sheet breathes with the music: a halo in the current ink behind the
+  // paper, its strength following the live level. Opacity only, so the
+  // compositor does the work and the drawing itself is never tinted.
+  const glowRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const glow = glowRef.current;
+    if (!glow) return;
+    if (!playing || !getLevels || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+      glow.style.opacity = '0';
+      return;
+    }
+    let level = 0;
+    let raf = 0;
+    const tick = () => {
+      const bands = getLevels(4);
+      if (bands) {
+        const target = bands.reduce((a, b) => a + b, 0) / bands.length;
+        level += (target - level) * (target > level ? 0.25 : 0.04);
+        // A soft aura, not a wash: past this it tints the whole desk.
+        glow.style.opacity = String(Math.min(0.3, level * 0.6));
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [playing, getLevels]);
+
   return (
-    <div className="flex flex-col gap-2.5">
-      <div className="relative overflow-hidden rounded-2xl">
-        <canvas
-          ref={canvasRef}
-          className={cn(
-            'block h-[28rem] w-full touch-none transition-opacity duration-300 xl:h-[36rem]',
-            showStart ? 'cursor-default opacity-40' : 'cursor-crosshair',
-          )}
-          onPointerDown={showStart ? undefined : down}
-          onPointerMove={showStart ? undefined : move}
-          onPointerUp={showStart ? undefined : up}
-          onPointerLeave={showStart ? undefined : up}
+    <div className="flex h-full min-h-0 flex-col items-center gap-3">
+      <div className="relative min-h-0 w-full flex-1">
+        <div
+          ref={glowRef}
+          aria-hidden="true"
+          className="pointer-events-none absolute -inset-2 rounded-[2.25rem] opacity-0 blur-2xl transition-[background-color] duration-700"
+          style={{ backgroundColor: `color-mix(in oklch, ${erasing ? COLORS[1] : color} 60%, white)` }}
         />
-        {!hasInk && !showStart && (
-          <div className="pointer-events-none absolute inset-0 grid place-items-center text-sm text-[#a8a49a]">
-            draw something
-          </div>
-        )}
-        {showStart && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-[#f4f1ea]/35 px-6">
-            {startExtras}
-            <Button
-              type="button"
-              size="icon"
-              variant="default"
-              aria-label="start"
-              title={startTitle ?? 'start'}
-              disabled={startDisabled}
-              className="size-20 shadow-lg [&_svg]:size-8"
-              onClick={onStart}
-            >
-              <Play className="translate-x-0.5" />
-            </Button>
-          </div>
-        )}
-        {onInterpret && !showStart && (
-          <Button
-            type="button"
-            size="icon"
-            variant="default"
-            aria-label="interpret drawing"
-            title="interpret drawing"
-            disabled={interpretDisabled || interpreting}
-            className="absolute right-3 bottom-3 size-10 shadow-md"
-            onClick={onInterpret}
-          >
-            {interpreting ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : (
-              <Equalizer animated={playing} getLevels={getLevels} />
+        {/* Dimmed a touch in dark mode so the sheet doesn't glare. A CSS filter
+            changes only what's shown; the pixels the eyes read stay as drawn. */}
+        <div className="relative h-full overflow-hidden rounded-[1.75rem] bg-paper shadow-[0_1px_2px_rgb(0_0_0/0.05),0_24px_60px_-30px_rgb(0_0_0/0.35)] ring-1 ring-black/[0.06] dark:brightness-[0.96]">
+          <canvas
+            ref={canvasRef}
+            className={cn(
+              'block h-full w-full touch-none transition-opacity duration-300',
+              showStart ? 'cursor-default opacity-40' : 'cursor-crosshair',
             )}
-          </Button>
-        )}
+            onPointerDown={showStart ? undefined : down}
+            onPointerMove={showStart ? undefined : move}
+            onPointerUp={showStart ? undefined : up}
+            onPointerLeave={showStart ? undefined : up}
+          />
+          {!hasInk && !showStart && (
+            <div className="pointer-events-none absolute inset-0 grid place-items-center px-6 text-center">
+              <div>
+                <p className="font-display text-3xl font-semibold tracking-tight text-pencil/25 sm:text-4xl">
+                  Draw anything
+                </p>
+                <p className="mt-2 text-sm text-pencil/40">The paper is listening</p>
+              </div>
+            </div>
+          )}
+          {showStart && (
+            <div className="on-paper absolute inset-0 flex flex-col items-center justify-center gap-4 bg-paper/60 px-6 text-center">
+              <Button
+                type="button"
+                size="icon"
+                aria-label="Start the band"
+                title={startTitle ?? 'Start the band'}
+                disabled={startDisabled}
+                className="size-20 bg-brand text-white shadow-[0_14px_40px_-10px_rgb(124_58_237/0.6)] transition-transform hover:scale-105 [&_svg]:size-8 [&_svg]:fill-current"
+                onClick={onStart}
+              >
+                <Play className="translate-x-0.5" />
+              </Button>
+              {startTitle && <p className="max-w-xs text-[15px] font-medium text-pencil/70">{startTitle}</p>}
+              {startExtras}
+            </div>
+          )}
+        </div>
       </div>
 
       {!showStart && (
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-          <div className="flex flex-wrap gap-0.5">
-            {COLORS.map((c) => (
-              <button
-                key={c}
-                type="button"
-                aria-label={`colour ${c}`}
-                aria-pressed={!erasing && color === c}
-                title={c}
-                onClick={() => {
-                  setColor(c);
-                  setErasing(false);
-                }}
-                className={cn(TOOL_CELL, !erasing && color === c ? TOOL_ON : TOOL_OFF)}
-              >
-                <span className="size-5 rounded-full" style={{ backgroundColor: c }} />
-              </button>
-            ))}
+        <div className="flex max-w-full flex-wrap items-center justify-center gap-x-1.5 gap-y-1 rounded-[1.6rem] bg-glass px-2 py-1.5 shadow-[0_8px_30px_-12px_rgb(0_0_0/0.25)] ring-1 ring-border backdrop-blur-xl">
+          <div className="flex flex-wrap justify-center" role="group" aria-label="ink">
+            {COLORS.map((c) => {
+              const on = !erasing && color === c;
+              return (
+                <button
+                  key={c}
+                  type="button"
+                  aria-label={`Ink ${c}`}
+                  aria-pressed={on}
+                  title={c}
+                  onClick={() => {
+                    setColor(c);
+                    setErasing(false);
+                  }}
+                  className="group grid size-7 place-items-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring/60 sm:size-8"
+                >
+                  <span
+                    className={cn(
+                      // The inset ring keeps the darkest inks visible on the dark dock.
+                      'size-4 rounded-full ring-1 ring-black/10 ring-inset transition-transform duration-200 sm:size-[18px] dark:ring-white/25',
+                      on ? 'scale-110' : 'group-hover:scale-110',
+                    )}
+                    style={{
+                      backgroundColor: c,
+                      boxShadow: on ? '0 0 0 2px var(--glass), 0 0 0 3.5px var(--foreground)' : undefined,
+                    }}
+                  />
+                </button>
+              );
+            })}
           </div>
 
-          <div className="flex items-center gap-2 text-muted-foreground">
+          <span className="mx-1 hidden h-6 w-px bg-border sm:block" aria-hidden="true" />
+
+          <div className="flex items-center gap-2 px-1 text-muted-foreground">
             <span
               className="grid size-5 shrink-0 place-items-center"
               aria-hidden="true"
@@ -813,18 +819,18 @@ export const DrawCanvas = forwardRef<CanvasHandle, Props>(function DrawCanvas(
               />
             </span>
             <Slider
-              className="w-24"
+              className="w-20"
               value={[brushSize]}
               min={SIZE_MIN}
               max={SIZE_MAX}
               step={1}
-              aria-label="brush size"
-              title={`brush ${brushSize}px`}
+              aria-label="Brush size"
+              title={`Brush ${brushSize}px`}
               onValueChange={([v]) => setBrushSize(v)}
             />
           </div>
 
-          <div className="flex items-center gap-2 text-muted-foreground">
+          <div className="hidden items-center gap-2 px-1 text-muted-foreground sm:flex">
             <span
               className="grid size-5 shrink-0 place-items-center"
               aria-hidden="true"
@@ -833,35 +839,44 @@ export const DrawCanvas = forwardRef<CanvasHandle, Props>(function DrawCanvas(
               <Droplet className="size-4" style={{ opacity: 0.35 + brushOpacity * 0.65 }} />
             </span>
             <Slider
-              className="w-24"
+              className="w-16"
               value={[brushOpacity * 100]}
               min={OPACITY_MIN * 100}
               max={100}
               step={1}
-              aria-label="brush opacity"
-              title={`opacity ${Math.round(brushOpacity * 100)}%`}
+              aria-label="Brush opacity"
+              title={`Opacity ${Math.round(brushOpacity * 100)}%`}
               onValueChange={([v]) => setBrushOpacity(v / 100)}
             />
           </div>
 
-          <div className="flex items-center gap-0.5">
+          <span className="mx-1 hidden h-6 w-px bg-border sm:block" aria-hidden="true" />
+
+          <div className="flex items-center">
             <button
               type="button"
-              aria-label="eraser"
+              aria-label="Eraser"
               aria-pressed={erasing}
-              title="eraser"
+              title="Eraser"
               onClick={() => setErasing((on) => !on)}
               className={cn(TOOL_CELL, erasing ? TOOL_ON : TOOL_OFF)}
             >
               <Eraser className="size-4" />
             </button>
-          </div>
-
-          <div className="flex items-center gap-0.5">
             <button
               type="button"
-              aria-label="undo"
-              title={`undo (${MOD}Z)`}
+              aria-label="Pen sound"
+              aria-pressed={paperSound}
+              title={paperSound ? 'Pen sound: on' : 'Pen sound: off'}
+              onClick={() => setPaperSound((on) => !on)}
+              className={cn(TOOL_CELL, paperSound ? TOOL_ON : TOOL_OFF)}
+            >
+              <AudioLines className="size-4" />
+            </button>
+            <button
+              type="button"
+              aria-label="Undo"
+              title={`Undo (${MOD}Z)`}
               disabled={!depth.undo}
               onClick={undo}
               className={cn(TOOL_CELL, TOOL_OFF, 'disabled:pointer-events-none disabled:opacity-35')}
@@ -870,8 +885,8 @@ export const DrawCanvas = forwardRef<CanvasHandle, Props>(function DrawCanvas(
             </button>
             <button
               type="button"
-              aria-label="redo"
-              title={`redo (${MOD}⇧Z)`}
+              aria-label="Redo"
+              title={`Redo (${MOD}⇧Z)`}
               disabled={!depth.redo}
               onClick={redo}
               className={cn(TOOL_CELL, TOOL_OFF, 'disabled:pointer-events-none disabled:opacity-35')}
@@ -880,8 +895,8 @@ export const DrawCanvas = forwardRef<CanvasHandle, Props>(function DrawCanvas(
             </button>
             <button
               type="button"
-              aria-label="clear drawing"
-              title="clear"
+              aria-label="Clear the page"
+              title="Clear the page"
               disabled={!hasInk}
               onClick={clearFromToolbar}
               className={cn(

@@ -3,57 +3,57 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* Two surface stacks. Light is the paper the pad already draws on; dark is the
-   original pure-black stack. Neither uses borders to separate — fills do it. */
+/* Two surface stacks over one idea: the desk is a quiet cool neutral, so the
+   paper and the colour in the music are the only warm things on screen. Panels
+   float on the desk; cards sit inside panels. */
 :root {
   --radius: 1rem;
-  /* Deliberately a shade *darker* than the pad's paper (#f4f1ea ≈ L 0.955):
-     the sheet and the cards have to lift off the page, and this stack has no
-     borders to fall back on. */
-  --background: oklch(0.912 0.006 85);
-  --foreground: oklch(0.24 0.012 85);
-  --card: oklch(0.972 0.004 85);
-  --card-foreground: oklch(0.24 0.012 85);
-  --popover: oklch(0.985 0.003 85);
-  --popover-foreground: oklch(0.24 0.012 85);
-  --primary: oklch(0.24 0.012 85);
-  --primary-foreground: oklch(0.97 0.006 85);
-  --secondary: oklch(0.858 0.008 85);
-  --secondary-foreground: oklch(0.24 0.012 85);
-  --muted: oklch(0.858 0.008 85);
-  --muted-foreground: oklch(0.45 0.012 85);
-  --accent: oklch(0.8 0.01 85);
-  --accent-foreground: oklch(0.2 0.012 85);
-  --destructive: oklch(0.52 0.19 25);
-  --border: oklch(0 0 0 / 12%);
-  --input: oklch(0.858 0.008 85);
-  --ring: oklch(0.5 0 0);
-  --live: oklch(0.6 0.13 165);
-  --warn: oklch(0.62 0.12 85);
+  --background: oklch(0.955 0.004 270);
+  --foreground: oklch(0.21 0.01 270);
+  --card: oklch(0.965 0.004 270);
+  --card-foreground: oklch(0.21 0.01 270);
+  --popover: oklch(0.995 0.001 270);
+  --popover-foreground: oklch(0.21 0.01 270);
+  --primary: oklch(0.21 0.01 270);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.93 0.005 270);
+  --secondary-foreground: oklch(0.21 0.01 270);
+  --muted: oklch(0.915 0.006 270);
+  --muted-foreground: oklch(0.5 0.012 270);
+  --accent: oklch(0.9 0.007 270);
+  --accent-foreground: oklch(0.21 0.01 270);
+  --destructive: oklch(0.56 0.2 25);
+  --border: oklch(0.21 0.01 270 / 9%);
+  --input: oklch(0.945 0.004 270);
+  --ring: oklch(0.6 0.2 300);
+  --live: oklch(0.62 0.15 155);
+  --warn: oklch(0.7 0.14 75);
+  --glass: oklch(1 0 0 / 0.74);
 }
 
 .dark {
   --radius: 1rem;
-  --background: oklch(0 0 0);
-  --foreground: oklch(0.93 0 0);
-  --card: oklch(0.16 0 0);
-  --card-foreground: oklch(0.93 0 0);
-  --popover: oklch(0.18 0 0);
-  --popover-foreground: oklch(0.93 0 0);
-  --primary: oklch(0.93 0 0);
-  --primary-foreground: oklch(0.15 0 0);
-  --secondary: oklch(0.23 0 0);
-  --secondary-foreground: oklch(0.93 0 0);
-  --muted: oklch(0.23 0 0);
-  --muted-foreground: oklch(0.62 0 0);
-  --accent: oklch(0.28 0 0);
-  --accent-foreground: oklch(0.97 0 0);
-  --destructive: oklch(0.72 0.14 22);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(0.23 0 0);
-  --ring: oklch(0.55 0 0);
-  --live: oklch(0.85 0.13 165);
-  --warn: oklch(0.85 0.1 85);
+  --background: oklch(0.165 0.006 270);
+  --foreground: oklch(0.96 0.003 270);
+  --card: oklch(0.25 0.007 270);
+  --card-foreground: oklch(0.96 0.003 270);
+  --popover: oklch(0.205 0.007 270);
+  --popover-foreground: oklch(0.96 0.003 270);
+  --primary: oklch(0.96 0.003 270);
+  --primary-foreground: oklch(0.18 0.006 270);
+  --secondary: oklch(0.285 0.008 270);
+  --secondary-foreground: oklch(0.96 0.003 270);
+  --muted: oklch(0.3 0.008 270);
+  --muted-foreground: oklch(0.7 0.012 270);
+  --accent: oklch(0.33 0.009 270);
+  --accent-foreground: oklch(0.98 0 0);
+  --destructive: oklch(0.7 0.17 22);
+  --border: oklch(1 0 0 / 9%);
+  --input: oklch(0.255 0.007 270);
+  --ring: oklch(0.72 0.17 300);
+  --live: oklch(0.8 0.15 155);
+  --warn: oklch(0.82 0.13 80);
+  --glass: oklch(0.23 0.007 270 / 0.74);
 }
 
 @theme inline {
@@ -77,6 +77,16 @@
   --color-ring: var(--ring);
   --color-live: var(--live);
   --color-warn: var(--warn);
+  --color-glass: var(--glass);
+  /* The paper is always paper, whatever the desk around it does. */
+  --color-paper: #fcfbf8;
+  --color-pencil: #15130f;
+  /* The wordmark's line, for the few things that are alive: the play button,
+     the music's own controls. Chrome stays neutral. */
+  --color-brand-1: #e2711d;
+  --color-brand-2: #e26d9e;
+  --color-brand-3: #7c3aed;
+  --font-display: 'Bricolage Grotesque', ui-sans-serif, system-ui, sans-serif;
   --radius-sm: calc(var(--radius) - 8px);
   --radius-md: calc(var(--radius) - 4px);
   --radius-lg: var(--radius);
@@ -102,6 +112,79 @@
   }
 }
 
+/* Landing demo: a sun, then waves, then a heart draw themselves while the chip
+   names what the band hears. Paths use pathLength="1", so a dash of 1 is the
+   whole stroke whatever its real length. */
+.doodle path {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+}
+/* Full shorthands, each with its name: the minifier turns a nameless
+   `animation: 12s …` into `animation: none`, which drops the duration. */
+.doodle-sun path {
+  animation: draw-sun 12s ease-in-out infinite;
+}
+.doodle-water path {
+  animation: draw-water 12s ease-in-out infinite;
+}
+.doodle-love path {
+  animation: draw-love 12s ease-in-out infinite;
+}
+.hearing-sun {
+  animation: say-sun 12s infinite;
+}
+.hearing-water {
+  animation: say-water 12s infinite;
+}
+.hearing-love {
+  animation: say-love 12s infinite;
+}
+@keyframes draw-sun {
+  0% { stroke-dashoffset: 1; opacity: 1; }
+  14%, 88% { stroke-dashoffset: 0; opacity: 1; }
+  96%, 100% { stroke-dashoffset: 0; opacity: 0; }
+}
+@keyframes draw-water {
+  0%, 30% { stroke-dashoffset: 1; opacity: 1; }
+  46%, 88% { stroke-dashoffset: 0; opacity: 1; }
+  96%, 100% { stroke-dashoffset: 0; opacity: 0; }
+}
+@keyframes draw-love {
+  0%, 60% { stroke-dashoffset: 1; opacity: 1; }
+  72%, 88% { stroke-dashoffset: 0; opacity: 1; }
+  96%, 100% { stroke-dashoffset: 0; opacity: 0; }
+}
+@keyframes say-sun {
+  0%, 6% { opacity: 0; transform: translateY(6px); }
+  10%, 30% { opacity: 1; transform: none; }
+  34%, 100% { opacity: 0; transform: translateY(-6px); }
+}
+@keyframes say-water {
+  0%, 32% { opacity: 0; transform: translateY(6px); }
+  36%, 60% { opacity: 1; transform: none; }
+  64%, 100% { opacity: 0; transform: translateY(-6px); }
+}
+@keyframes say-love {
+  0%, 62% { opacity: 0; transform: translateY(6px); }
+  66%, 92% { opacity: 1; transform: none; }
+  96%, 100% { opacity: 0; transform: translateY(-6px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .doodle path {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+  .hearing-sun,
+  .hearing-water {
+    animation: none;
+    opacity: 0;
+  }
+  .hearing-love {
+    animation: none;
+    opacity: 1;
+  }
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
@@ -119,4 +202,31 @@
     background: var(--muted);
     border-radius: 999px;
   }
+}
+
+/* Controls laid on the paper keep the light stack whatever the theme: the paper
+   is always paper, so a dark input on it would read as a hole. */
+.on-paper {
+  --foreground: oklch(0.21 0.01 270);
+  --muted-foreground: oklch(0.5 0.012 270);
+  --input: oklch(0.93 0.005 270);
+  --secondary: oklch(0.91 0.006 270);
+  --ring: oklch(0.6 0.2 300);
+  color: var(--foreground);
+}
+
+@utility bg-brand {
+  background-image: linear-gradient(120deg, var(--color-brand-1), var(--color-brand-2) 50%, var(--color-brand-3));
+}
+@utility text-brand {
+  background-image: linear-gradient(90deg, var(--color-brand-1), var(--color-brand-2) 55%, var(--color-brand-3));
+  background-clip: text;
+  color: transparent;
+}
+
+/* Native modal for settings: the browser handles focus, Escape and the top
+   layer, so nothing here re-implements them. */
+dialog::backdrop {
+  background: oklch(0.15 0.01 270 / 0.4);
+  backdrop-filter: blur(6px);
 }

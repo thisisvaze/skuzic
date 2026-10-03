@@ -1,11 +1,28 @@
 <!doctype html>
-<html lang="en" class="dark">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>skuzic</title>
-    <!-- Applied before first paint so a saved light theme doesn't flash black. -->
-    <script>try{document.documentElement.classList.toggle('dark',JSON.parse(localStorage.getItem('skuzic_theme')||'"dark"')==='dark')}catch(e){}</script>
+    <title>skuzic · draw something, hear it turn into music</title>
+    <meta
+      name="description"
+      content="An experiment in drawing with sound. Every stroke rings in key, and the band follows what you draw."
+    />
+    <meta property="og:title" content="skuzic" />
+    <meta
+      property="og:description"
+      content="Draw something. Hear it turn into music."
+    />
+    <meta name="theme-color" content="#eff0f3" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&display=swap"
+    />
+    <!-- Applied before first paint, so the page never flashes the wrong theme.
+         "system" (the default) follows the OS; App.tsx keeps it in sync after. -->
+    <script>try{var t=JSON.parse(localStorage.getItem('skuzic_theme')||'"system"'),d=t==='dark'||(t!=='light'&&matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.classList.toggle('dark',d);document.querySelector('meta[name="theme-color"]').setAttribute('content',d?'#131417':'#eff0f3')}catch(e){}</script>
   </head>
   <body>
     <div id="root"></div>

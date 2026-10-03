@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
-import { ChevronDown, Moon, Pause, Play, Plus, Square, Sun } from 'lucide-react';
+import { Pause, Play, SettingsIcon, SlidersHorizontal, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Slider } from '@/components/ui/slider';
 import { cn } from '@/lib/utils';
 import {
@@ -31,12 +30,24 @@ import {
   type Plan,
   type PlannerModel,
 } from './llm/planner';
+import {
+  INTRO,
+  eyesOwn,
+  loadEyes,
+  mixActions,
+  nextMix,
+  readPage,
+  type Mix,
+} from './vision/eyes';
+import { inkConfig, inkOf, type Ink } from './vision/ink';
 import { AbChoice } from './ui/AbChoice';
 import { ActionLog, type LogEntry } from './ui/ActionLog';
 import { ApiKeyField } from './ui/ApiKeyField';
-import { ConfigPanel } from './ui/ConfigPanel';
 import { DrawCanvas, type CanvasHandle } from './ui/DrawCanvas';
-import { TrackRack } from './ui/TrackRack';
+import { Equalizer } from './ui/Equalizer';
+import { Landing, Wordmark } from './ui/Landing';
+import { Mixer } from './ui/Mixer';
+import { Settings, type Theme } from './ui/Settings';
 
 const BRIDGE_URL =
   (import.meta.env.VITE_MAGENTA_BRIDGE_URL as string | undefined) || DEFAULT_BRIDGE_URL;
@@ -47,14 +58,10 @@ function loadBackend(fallback: Backend): Backend {
   return saved in BACKEND_LABELS ? (saved as Backend) : fallback;
 }
 
-/**
- * How long the pad must sit still before auto-interpret spends a call. Long
- * enough to cover the gap between strokes of one drawing, short enough that a
- * finished sketch still reacts promptly.
- */
-const AUTO_INTERPRET_DEBOUNCE_MS = 900;
-
 type Planner = ReturnType<typeof createPlanner>;
+
+/** Wide enough for the mixer to sit beside the paper instead of over it (Tailwind's lg). */
+const wide = () => window.matchMedia('(min-width: 1024px)').matches;
 
 /** One arm of a pending A/B choice, with its resulting mix precomputed. */
 interface AbVariantPlan {
@@ -100,19 +107,39 @@ export default function App() {
   const [buffered, setBuffered] = useState(0);
   const [masterVolume, setMasterVolume] = useState(() => load(KEYS.masterVolume, 0.8));
   const [thinking, setThinking] = useState(false);
-  const [eventText, setEventText] = useState('');
   const [log, setLog] = useState<LogEntry[]>([]);
-  const [engineMenuOpen, setEngineMenuOpen] = useState(false);
-  // index.html sets the class before first paint; this only keeps it in sync
-  // with the toggle and writes the choice back.
-  const [theme, setTheme] = useState<'dark' | 'light'>(() => load(KEYS.theme, 'dark'));
-  useEffect(() => {
-    document.documentElement.classList.toggle('dark', theme === 'dark');
-    save(KEYS.theme, theme);
-  }, [theme]);
-  const [autoInterpret, setAutoInterpret] = useState(
-    () => load(KEYS.autoInterpret, false),
+  /** First visit, or the wordmark: the landing. A saved key goes straight to drawing. */
+  const [view, setView] = useState<'landing' | 'studio'>(() =>
+    load(KEYS.apiKey, '') ? 'studio' : 'landing',
   );
+  /** Docked beside the paper on wide screens, where it starts open; a sheet on phones, where it starts closed. */
+  const [mixerOpen, setMixerOpen] = useState(() => wide() && load(KEYS.mixerOpen, true));
+  const showMixer = (open: boolean) => {
+    setMixerOpen(open);
+    if (wide()) save(KEYS.mixerOpen, open);
+  };
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  /** What the top bar says the band is hearing: a scene, or Gemini's take. */
+  const [scene, setScene] = useState<string | null>(null);
+  // index.html sets the class before first paint; this keeps it in sync with
+  // the setting, and with the system while the setting says to follow it.
+  const [theme, setTheme] = useState<Theme>(() => load<Theme>(KEYS.theme, 'system'));
+  useEffect(() => {
+    save(KEYS.theme, theme);
+    const media = window.matchMedia('(prefers-color-scheme: dark)');
+    const apply = () => {
+      const dark = theme === 'dark' || (theme === 'system' && media.matches);
+      document.documentElement.classList.toggle('dark', dark);
+      document
+        .querySelector('meta[name="theme-color"]')
+        ?.setAttribute('content', dark ? '#131417' : '#eff0f3');
+    };
+    apply();
+    if (theme !== 'system') return;
+    media.addEventListener('change', apply);
+    return () => media.removeEventListener('change', apply);
+  }, [theme]);
+  const [autoInterpret, setAutoInterpret] = useState(() => load(KEYS.autoInterpret, true));
   const [abTest, setAbTest] = useState(() => load(KEYS.abTest, false));
   const [pendingAb, setPendingAb] = useState<PendingAb | null>(null);
   /** Which pending variant the engine is playing right now. */
@@ -162,8 +189,6 @@ export default function App() {
   const queued = useRef<{ event: string; includeDrawing: boolean } | null>(null);
   /** Read inside runPlan, where the `buffered` state value would be a stale closure. */
   const bufferRef = useRef(0);
-  const autoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const engineMenuRef = useRef<HTMLDivElement>(null);
 
   // The planner needs the mix as of the moment the button was tapped, not as of
   // the render that created the handler.
@@ -317,19 +342,15 @@ export default function App() {
     [],
   );
 
-  // Close Engine on outside click (scale select portals outside the menu).
   useEffect(() => {
-    if (!engineMenuOpen) return;
-    const onPointerDown = (e: PointerEvent) => {
-      const target = e.target as Node | null;
-      if (!target) return;
-      if (engineMenuRef.current?.contains(target)) return;
-      if (target instanceof Element && target.closest('[data-slot="select-content"]')) return;
-      setEngineMenuOpen(false);
+    if (!mixerOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      // Only the phone sheet covers the paper; the desktop column stays put.
+      if (e.key === 'Escape' && !wide()) setMixerOpen(false);
     };
-    document.addEventListener('pointerdown', onPointerDown);
-    return () => document.removeEventListener('pointerdown', onPointerDown);
-  }, [engineMenuOpen]);
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [mixerOpen]);
 
   /**
    * Point the engine at a candidate state without touching the reducer — how
@@ -438,6 +459,7 @@ export default function App() {
     // The planner always runs on Gemini, whichever backend makes the audio.
     plannerRef.current = createPlanner(key, plannerModel);
     plannerBRef.current = createPlanner(key, plannerModel);
+    if (autoInterpret) warmEyes();
 
     try {
       await engine.connect();
@@ -496,6 +518,9 @@ export default function App() {
     setAuditionMode('off');
     setStatus('idle');
     setBuffered(0);
+    // The next session reads the page fresh rather than assuming the old scene.
+    mixRef.current = null;
+    setScene(null);
   };
 
   /**
@@ -510,6 +535,13 @@ export default function App() {
   const switchBackend = async (next: Backend) => {
     if (next === stateRef.current.backend) return;
     dispatch({ type: 'SET_BACKEND', backend: next });
+    // The engines want different balances of the same mix, so re-weight it,
+    // unless Gemini or the user has rewritten the tracks since the eyes chose.
+    const mix = mixRef.current;
+    if (mix && eyesOwn(stateRef.current.tracks, mix)) {
+      const { density, brightness } = stateRef.current.config;
+      mixActions(mix, next, { density, brightness }).forEach((action) => dispatch(action));
+    }
     save(KEYS.backend, next);
     if (!engineRef.current) return;
     await stop();
@@ -681,6 +713,8 @@ export default function App() {
             // planner and start() installs a new one.
             if (plannerRef.current === planner) {
               plan.actions.forEach((action: Action) => dispatch(action));
+              setScene('your page, reimagined');
+              canvasRef.current?.cue();
               pushLog({
                 event: jobEvent,
                 reasoning: plan.reasoning,
@@ -713,36 +747,113 @@ export default function App() {
     [pushLog, steerEngine, spawnAudition],
   );
 
-  /** Auto-interpret: wait for the user to stop drawing before spending a call. */
-  const queueAutoPlan = useCallback(
-    (event: string, includeDrawing: boolean) => {
-      if (autoTimer.current) clearTimeout(autoTimer.current);
-      autoTimer.current = setTimeout(() => {
-        autoTimer.current = null;
-        void runPlan(event, includeDrawing);
-      }, AUTO_INTERPRET_DEBOUNCE_MS);
-    },
-    [runPlan],
-  );
-
-  /** Explicit user action — pre-empts any pending auto-interpret. */
+  /** Explicit user action: Gemini reads the page, or a typed event. */
   const trigger = useCallback(
-    (event: string, includeDrawing = false) => {
-      if (autoTimer.current) {
-        clearTimeout(autoTimer.current);
-        autoTimer.current = null;
-      }
-      void runPlan(event, includeDrawing);
-    },
+    (event: string, includeDrawing = false) => void runPlan(event, includeDrawing),
     [runPlan],
   );
 
-  useEffect(
-    () => () => {
-      if (autoTimer.current) clearTimeout(autoTimer.current);
-    },
-    [],
-  );
+  // ---- the eyes: SigLIP reads the page on pen-up ---------------------------
+
+  /** The mix the eyes last put on, so a reading that agrees changes nothing. */
+  const mixRef = useRef<Mix | null>(null);
+  const reading = useRef(false);
+  const readAgain = useRef(false);
+
+  /**
+   * Pen-up, undo, redo and clear all land here. One reading at a time; strokes
+   * that land mid-read collapse into one more read of the newest page. Only a
+   * change of scene touches the mix, so a Gemini arrangement survives until the
+   * drawing turns into something else.
+   */
+  const readDrawing = useCallback(async () => {
+    if (reading.current) {
+      readAgain.current = true;
+      return;
+    }
+    reading.current = true;
+    try {
+      do {
+        readAgain.current = false;
+        const canvas = canvasRef.current;
+        // A choice on the table owns the mix until the user picks.
+        if (!engineRef.current || pendingAbRef.current || !canvas) return;
+
+        const startedAt = performance.now();
+        const playing = mixRef.current;
+        let next: Mix | null = playing === INTRO ? null : INTRO;
+        let ink: Ink = { coverage: 0, warmth: 0 };
+        let reasoning = 'the page is empty';
+        if (!canvas.isEmpty()) {
+          const url = canvas.toDataURL();
+          const [vector, page] = await Promise.all([(await loadEyes()).read(url), inkOf(url)]);
+          const reading = readPage(vector);
+          ink = page;
+          reasoning = [...reading.moods.slice(0, 2), ...reading.instruments.slice(0, 2)]
+            .map((r) => `${r.item.label} ${Math.round(r.p * 100)}%`)
+            .join(' · ');
+          next = nextMix(reading, playing);
+        }
+        const mix = next ?? playing;
+        if (!mix) continue;
+        // How much ink and how warm it is move the two live knobs on every
+        // reading, so the music grows as the page fills even within one mix.
+        const config = inkConfig(mix.mood, ink);
+
+        if (!next) {
+          // Gemini's own knob settings stand until the drawing reads as something new.
+          const now = stateRef.current.config;
+          if (
+            eyesOwn(stateRef.current.tracks, mix) &&
+            (Math.abs(now.density - config.density) >= 0.05 ||
+              Math.abs(now.brightness - config.brightness) >= 0.05)
+          ) {
+            dispatch({ type: 'SET_CONFIG', config });
+          }
+          continue;
+        }
+
+        mixRef.current = next;
+        setScene(next.mood.label);
+        // The pen answers a new mood now; the band takes a few seconds to follow.
+        if (next !== INTRO && next.mood !== playing?.mood) {
+          canvasRef.current?.cue(next.mood.brightness >= 0.5);
+        }
+        const actions = mixActions(next, stateRef.current.backend, config);
+        actions.forEach((action) => dispatch(action));
+        pushLog({
+          event: `Feels like ${next.mood.label}: ${next.instruments.map((i) => i.label).join(' and ')}`,
+          reasoning: `${reasoning} · read in ${Math.round(performance.now() - startedAt)} ms`,
+          actions,
+        });
+      } while (readAgain.current);
+    } catch (error) {
+      pushLog({
+        event: "Couldn't read the drawing",
+        error: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      reading.current = false;
+    }
+  }, [pushLog]);
+
+  /** Fetches SigLIP while the band connects, so the first stroke is read at once. */
+  const warmEyes = useCallback(() => {
+    const startedAt = performance.now();
+    loadEyes().then(
+      (eyes) =>
+        pushLog({
+          event: `Ready to read your drawing (SigLIP 2 on ${eyes.device === 'webgpu' ? 'the GPU' : 'the CPU'}, ${(
+            (performance.now() - startedAt) / 1000
+          ).toFixed(1)} s)`,
+        }),
+      (error) =>
+        pushLog({
+          event: "Couldn't load the drawing reader",
+          error: error instanceof Error ? error.message : String(error),
+        }),
+    );
+  }, [pushLog]);
 
   // ---- A/B choice ----------------------------------------------------------
 
@@ -922,210 +1033,215 @@ export default function App() {
 
   // ---- render --------------------------------------------------------------
 
-  return (
-    <div className="mx-auto flex max-w-[100rem] flex-col gap-7 px-5 pt-5 pb-12">
-      <header className="flex flex-wrap items-center gap-3">
-        <span className="font-semibold tracking-tight">skuzic</span>
+  /** One line that says what the instrument is doing right now. */
+  const hearing =
+    status === 'connecting'
+      ? 'Starting the band…'
+      : status === 'error'
+        ? 'The band dropped out'
+        : !connected
+          ? 'Not playing'
+          : thinking
+            ? 'Reimagining…'
+            : status === 'paused'
+              ? 'Paused'
+              : (scene ?? 'Draw anything');
 
-        {connected && (
-          <>
-            <div className="relative" ref={engineMenuRef}>
-              <Button
-                variant="secondary"
-                size="sm"
-                aria-expanded={engineMenuOpen}
-                aria-haspopup="true"
-                title="engine settings"
-                className={cn('gap-1', engineMenuOpen && 'bg-accent text-foreground')}
-                onClick={() => setEngineMenuOpen((open) => !open)}
-              >
-                Engine
-                <ChevronDown
-                  className={cn('transition-transform', engineMenuOpen && 'rotate-180')}
+  const togglePlay = () => {
+    // Either way the user now owns playback state; an earlier
+    // empty-mix auto-pause must not resume over their head.
+    autoPaused.current = false;
+    // Both arms of a dual-stream audition pause and resume
+    // together — play() on the muted arm cannot unmute it, since
+    // the scheduler returns to its own (zero) volume.
+    if (playing) {
+      engineRef.current?.pause();
+      auditionEngineRef.current?.pause();
+    } else if (!canvasRef.current?.isEmpty()) {
+      engineRef.current?.play();
+      auditionEngineRef.current?.play();
+    }
+  };
+
+  /** The landing's button is also the gesture that lets the browser start audio. */
+  const enterStudio = () => {
+    commitKey(apiKey);
+    setView('studio');
+    void start();
+  };
+
+  return (
+    <>
+      {/* Stays mounted under the landing, so going back to it never loses the drawing. */}
+      <div className="flex h-dvh flex-col overflow-hidden" inert={view === 'landing'}>
+        <header className="flex h-14 shrink-0 items-center gap-2 px-3 sm:px-5">
+          <button
+            type="button"
+            title="About skuzic"
+            onClick={() => setView('landing')}
+            className="shrink-0 rounded-full px-2 py-1.5 outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+          >
+            <Wordmark compact />
+          </button>
+
+          {/* The mixer at its smallest: always here, whatever is open. */}
+          <div className="flex min-w-0 flex-1 justify-center">
+            <div
+              role="status"
+              title={statusDetail || undefined}
+              className="flex h-10 min-w-0 items-center gap-2.5 rounded-full bg-glass pr-4 pl-1 shadow-sm ring-1 ring-border backdrop-blur-xl"
+            >
+              {connected ? (
+                <button
+                  type="button"
+                  aria-label={playing ? 'Pause' : 'Play'}
+                  title={playing ? 'Pause' : 'Play'}
+                  onClick={togglePlay}
+                  className={cn(
+                    'grid size-8 shrink-0 place-items-center rounded-full outline-none transition-colors',
+                    'focus-visible:ring-2 focus-visible:ring-ring/60 [&_svg]:size-4 [&_svg]:fill-current',
+                    playing
+                      ? 'bg-brand text-white'
+                      : 'bg-primary text-primary-foreground hover:bg-primary/85',
+                  )}
+                >
+                  {playing ? <Pause /> : <Play className="translate-x-px" />}
+                </button>
+              ) : (
+                <span className="grid size-8 shrink-0 place-items-center">
+                  <span className={cn('size-2 rounded-full', DOT[status])} />
+                </span>
+              )}
+              {audible && <Equalizer animated getLevels={getLevels} />}
+              <span className="truncate text-[13px] first-letter:uppercase">{hearing}</span>
+              {status === 'error' && (
+                <button
+                  type="button"
+                  onClick={() => void start()}
+                  className="shrink-0 text-[13px] font-medium underline underline-offset-2"
+                >
+                  Retry
+                </button>
+              )}
+              {connected && (
+                <Slider
+                  className="ml-1 hidden w-20 md:flex"
+                  value={[masterVolume * 100]}
+                  max={100}
+                  step={1}
+                  aria-label="Volume"
+                  title={`Volume ${Math.round(masterVolume * 100)}`}
+                  onValueChange={([v]) => setMasterVolume(v / 100)}
                 />
-              </Button>
-              {engineMenuOpen && (
-                <div className="absolute left-0 top-full z-50 pt-2">
-                  <div className="w-[34rem] max-w-[calc(100vw-2.5rem)] rounded-2xl bg-popover p-5 text-popover-foreground shadow-lg lg:w-[46rem]">
-                    <p className="mb-4 text-[12px] text-muted-foreground/70">
-                      {caps.bpm
-                        ? 'bpm and scale changes restart generation'
-                        : 'blended style embeddings · no tempo or key control'}
-                    </p>
-                    <ConfigPanel
-                      config={state.config}
-                      capabilities={caps}
-                      dispatch={dispatch}
-                      backend={state.backend}
-                      onBackendChange={(b) => void switchBackend(b)}
-                      autoInterpret={autoInterpret}
-                      onAutoInterpretChange={(on) => {
-                        setAutoInterpret(on);
-                        save(KEYS.autoInterpret, on);
-                      }}
-                      abTest={abTest}
-                      onAbTestChange={(on) => {
-                        setAbTest(on);
-                        save(KEYS.abTest, on);
-                      }}
-                      datasetCount={datasetCount}
-                      onExportDataset={() => void exportDataset()}
-                      plannerModel={plannerModel}
-                      onPlannerModelChange={(m) => {
-                        setPlannerModel(m);
-                        save(KEYS.plannerModel, m);
-                      }}
-                      plannerConfig={plannerConfig}
-                      onPlannerConfigChange={(c) => {
-                        setPlannerConfig(c);
-                        save(KEYS.plannerConfig, c);
-                      }}
-                      apiKey={apiKey}
-                      onApiKeyChange={setApiKey}
-                      onApiKeyCommit={(key) => {
-                        const trimmed = key.trim();
-                        if (trimmed === load(KEYS.apiKey, '')) return;
-                        commitKey(trimmed);
-                        if (engineRef.current) {
-                          void stop().then(() => {
-                            if (trimmed) void start();
-                          });
-                        }
-                      }}
-                    />
-                  </div>
-                </div>
               )}
             </div>
+          </div>
 
-            <span
-              className={cn('size-1.5 shrink-0 rounded-full', DOT[status])}
-              title={
-                `${status} · ${buffered.toFixed(1)}s${statusDetail ? ` — ${statusDetail}` : ''}`
-              }
-              aria-label={`${status} · ${buffered.toFixed(1)}s`}
-            />
-          </>
-        )}
-
-        <div className="flex-1" />
-
-        {connected && (
-          <>
-            <Slider
-              className="w-24"
-              value={[masterVolume * 100]}
-              max={100}
-              step={1}
-              aria-label="master volume"
-              title={`volume ${Math.round(masterVolume * 100)}`}
-              onValueChange={([v]) => setMasterVolume(v / 100)}
-            />
+          <div className="flex shrink-0 items-center gap-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              title="Gemini rewrites the music from your drawing"
+              disabled={!connected || thinking || !!pendingAb}
+              className="[&_svg]:text-brand-3"
+              onClick={() => trigger('Recognized Input Update', true)}
+            >
+              <Sparkles />
+              <span className="hidden sm:inline">Reimagine</span>
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              aria-label="Mixer"
+              aria-pressed={mixerOpen}
+              title={mixerOpen ? 'Hide the mixer' : 'Show the mixer'}
+              className={cn('max-sm:size-8 max-sm:px-0', mixerOpen && 'bg-secondary text-foreground')}
+              onClick={() => showMixer(!mixerOpen)}
+            >
+              <SlidersHorizontal />
+              <span className="hidden sm:inline">Mixer</span>
+            </Button>
             <Button
               size="icon"
-              aria-label={playing ? 'pause' : 'play'}
-              title={playing ? 'pause' : 'play'}
-              onClick={() => {
-                // Either way the user now owns playback state; an earlier
-                // empty-mix auto-pause must not resume over their head.
-                autoPaused.current = false;
-                // Both arms of a dual-stream audition pause and resume
-                // together — play() on the muted arm cannot unmute it, since
-                // the scheduler returns to its own (zero) volume.
-                if (playing) {
-                  engineRef.current?.pause();
-                  auditionEngineRef.current?.pause();
-                } else if (!canvasRef.current?.isEmpty()) {
-                  engineRef.current?.play();
-                  auditionEngineRef.current?.play();
-                }
-              }}
+              variant="ghost"
+              aria-label="Settings"
+              title="Settings"
+              onClick={() => setSettingsOpen(true)}
             >
-              {playing ? <Pause /> : <Play />}
+              <SettingsIcon />
             </Button>
-            <Button size="icon" variant="ghost" aria-label="stop" title="stop" onClick={stop}>
-              <Square />
-            </Button>
-          </>
-        )}
+          </div>
+        </header>
 
-        <Button
-          size="icon"
-          variant="ghost"
-          aria-label={theme === 'dark' ? 'switch to light theme' : 'switch to dark theme'}
-          title={theme === 'dark' ? 'light theme' : 'dark theme'}
-          onClick={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
-        >
-          {theme === 'dark' ? <Sun /> : <Moon />}
-        </Button>
-      </header>
+        <div className="flex min-h-0 flex-1 gap-3 px-3 pb-3 sm:px-5 sm:pb-4">
+          <main className="min-h-0 min-w-0 flex-1">
+            <DrawCanvas
+              ref={canvasRef}
+              autoInterpret={autoInterpret}
+              playing={audible}
+              getLevels={getLevels}
+              interpretDisabled={!connected || !!pendingAb}
+              showStart={!connected}
+              onStart={() => {
+                commitKey(apiKey);
+                void start();
+              }}
+              startDisabled={!apiKey.trim() || status === 'connecting'}
+              startTitle={
+                !apiKey.trim()
+                  ? 'Paste a Gemini API key to start the band'
+                  : status === 'connecting'
+                    ? 'Starting the band…'
+                    : status === 'error'
+                      ? statusDetail || 'Something went wrong. Try again.'
+                      : 'Start the band, then draw'
+              }
+              startExtras={
+                !apiKey.trim() && (
+                  <ApiKeyField
+                    className="w-72 max-w-full text-left [&_a]:text-muted-foreground"
+                    value={apiKey}
+                    onChange={setApiKey}
+                  />
+                )
+              }
+              onAutoInterpret={() => void readDrawing()}
+              onClearInterpret={() => void readDrawing()}
+            />
+          </main>
 
-      {/* Wide screens put the pad beside the mix so drawing and the plan it
-          produces sit in one eyeline; below xl everything stacks as before. */}
-      <main className="grid grid-cols-1 gap-7 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] xl:items-start">
-        <section className="min-w-0">
-          <DrawCanvas
-            ref={canvasRef}
-            autoInterpret={autoInterpret}
-            interpreting={thinking}
-            playing={audible}
-            getLevels={getLevels}
-            interpretDisabled={!connected || !!pendingAb}
-            showStart={!connected}
-            onStart={() => {
-              commitKey(apiKey);
-              void start();
+          <Mixer
+            open={mixerOpen}
+            onClose={() => showMixer(false)}
+            title={
+              pendingAb
+                ? `version ${abAudition === 0 ? 'A' : 'B'}`
+                : (scene ?? (connected ? 'nothing yet' : 'not playing'))
+            }
+            // While a choice is pending the mixer mirrors the arm being
+            // auditioned, read-only: the committed mix is on hold and showing
+            // it here would only mislead.
+            tracks={pendingAb ? pendingAb.variants[abAudition].next.tracks : state.tracks}
+            readOnly={!!pendingAb}
+            dispatch={dispatch}
+            config={state.config}
+            capabilities={caps}
+            follow={autoInterpret}
+            onFollowChange={(on) => {
+              setAutoInterpret(on);
+              save(KEYS.autoInterpret, on);
+              // Turning it on should be heard now, not at the next pen-up.
+              if (on) void readDrawing();
             }}
-            startDisabled={!apiKey.trim() || status === 'connecting'}
-            startTitle={
-              !apiKey.trim()
-                ? 'Paste a Gemini API key to start'
-                : status === 'connecting'
-                  ? 'connecting…'
-                  : status === 'error'
-                    ? statusDetail || 'retry'
-                    : 'start'
-            }
-            startExtras={
-              <ApiKeyField
-                className="w-72 max-w-full text-left [&_a]:text-[#5c574e]"
-                value={apiKey}
-                onChange={setApiKey}
-              />
-            }
-            onInterpret={() => trigger('Recognized Input Update', true)}
-            onAutoInterpret={() => queueAutoPlan('Recognized Input Update', true)}
-            onClearInterpret={() => queueAutoPlan('user cleared the drawing', false)}
+            canAsk={connected && !thinking && !pendingAb}
+            thinking={thinking}
+            onAsk={(text) => trigger(text)}
+            log={log}
           />
+        </div>
 
-          {connected && (
-            <form
-              className="mt-2.5 flex gap-2"
-              onSubmit={(e) => {
-                e.preventDefault();
-                void trigger(eventText);
-                setEventText('');
-              }}
-            >
-              <Input
-                placeholder="describe an event…"
-                value={eventText}
-                onChange={(e) => setEventText(e.target.value)}
-              />
-              <Button
-                size="icon"
-                aria-label="fire event"
-                title="fire event"
-                disabled={thinking || !!pendingAb || !eventText.trim()}
-              >
-                <Plus />
-              </Button>
-            </form>
-          )}
-        </section>
-
-        <div className="flex min-w-0 flex-col gap-7">
-          {pendingAb && (
+        {pendingAb && (
+          <div className="fixed inset-x-3 bottom-24 z-30 mx-auto max-w-3xl rounded-[1.6rem] bg-popover/95 p-4 text-popover-foreground shadow-2xl ring-1 ring-border backdrop-blur-xl sm:inset-x-6">
             <AbChoice
               variants={pendingAb.variants.map((v) => ({
                 reasoning: v.plan.reasoning,
@@ -1139,39 +1255,61 @@ export default function App() {
               onChoose={chooseAb}
               onDismiss={dismissAb}
             />
-          )}
+          </div>
+        )}
+      </div>
 
-          {connected && (
-            <div className="grid grid-cols-1 items-start gap-x-6 gap-y-7 md:grid-cols-2 xl:grid-cols-1">
-              <section className="min-w-0">
-                <h2 className="mb-2.5 flex items-baseline gap-2 text-[13px] text-muted-foreground">
-                  Mix
-                  <span className="text-muted-foreground/60">
-                    {pendingAb
-                      ? `auditioning ${abAudition === 0 ? 'A' : 'B'} · ${
-                          pendingAb.variants[abAudition].next.tracks.length
-                        } / ${caps.maxPrompts} tracks`
-                      : `${state.tracks.length} / ${caps.maxPrompts} tracks`}
-                  </span>
-                </h2>
-                {/* While a choice is pending the rack mirrors the arm being
-                    auditioned, read-only — the committed mix is on hold and
-                    showing it here only misleads. */}
-                <TrackRack
-                  tracks={pendingAb ? pendingAb.variants[abAudition].next.tracks : state.tracks}
-                  dispatch={dispatch}
-                  readOnly={!!pendingAb}
-                />
-              </section>
+      <Settings
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        backend={state.backend}
+        onBackendChange={(b) => void switchBackend(b)}
+        apiKey={apiKey}
+        onApiKeyChange={setApiKey}
+        onApiKeyCommit={(key) => {
+          const trimmed = key.trim();
+          if (trimmed === load(KEYS.apiKey, '')) return;
+          commitKey(trimmed);
+          if (engineRef.current) {
+            void stop().then(() => {
+              if (trimmed) void start();
+            });
+          }
+        }}
+        plannerConfig={plannerConfig}
+        onPlannerConfigChange={(c) => {
+          setPlannerConfig(c);
+          save(KEYS.plannerConfig, c);
+        }}
+        plannerModel={plannerModel}
+        onPlannerModelChange={(m) => {
+          setPlannerModel(m);
+          save(KEYS.plannerModel, m);
+        }}
+        abTest={abTest}
+        onAbTestChange={(on) => {
+          setAbTest(on);
+          save(KEYS.abTest, on);
+        }}
+        datasetCount={datasetCount}
+        onExportDataset={() => void exportDataset()}
+        theme={theme}
+        onThemeChange={setTheme}
+        connected={connected}
+        onDisconnect={() => {
+          setSettingsOpen(false);
+          void stop();
+        }}
+      />
 
-              <section className="min-w-0">
-                <h2 className="mb-2.5 text-[13px] text-muted-foreground">Flow</h2>
-                <ActionLog entries={log} />
-              </section>
-            </div>
-          )}
-        </div>
-      </main>
-    </div>
+      {view === 'landing' && (
+        <Landing
+          apiKey={apiKey}
+          onApiKeyChange={setApiKey}
+          onStart={enterStudio}
+          returning={connected}
+        />
+      )}
+    </>
   );
 }

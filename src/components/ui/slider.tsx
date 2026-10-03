@@ -25,7 +25,7 @@ function Slider({
   // `pct% + (0.5 - pct) * thumbSize` — not at a flat `pct%`. Painting the fill
   // as a gradient to that exact point is the only way the boundary stays hidden
   // under the thumb at every position instead of peeking out near the ends.
-  const thumb = fat ? 28 : 14;
+  const thumb = fat ? 24 : 14;
   const pct = Math.min(1, Math.max(0, (values[0] - min) / (max - min || 1)));
   const stop = `calc(${pct * 100}% + ${(0.5 - pct) * thumb}px)`;
 
@@ -44,7 +44,7 @@ function Slider({
     >
       <SliderPrimitive.Track
         data-slot="slider-track"
-        className={cn('relative grow overflow-hidden rounded-full', fat ? 'h-7' : 'h-1.5')}
+        className={cn('relative grow overflow-hidden rounded-full', fat ? 'h-6' : 'h-1.5')}
         style={{
           background: `linear-gradient(to right, var(--slider-range, var(--foreground)) 0 ${stop}, var(--slider-track, var(--muted)) ${stop} 100%)`,
         }}
@@ -54,7 +54,7 @@ function Slider({
         className={cn(
           'block shrink-0 rounded-full bg-[var(--slider-thumb,var(--foreground))] outline-none',
           'transition-shadow focus-visible:ring-2 focus-visible:ring-ring/60',
-          fat ? 'size-7' : 'size-3.5',
+          fat ? 'size-6 shadow-[0_1px_4px_rgb(0_0_0/0.3)]' : 'size-3.5',
         )}
       />
     </SliderPrimitive.Root>

@@ -5,18 +5,22 @@
 
 export const KEYS = {
   apiKey: 'skuzic_key',
-  autoInterpret: 'skuzic_auto_interpret',
+  // v2: auto interpret now reads the page with SigLIP on pen-up and defaults on.
+  // A stored "off" from the Gemini-only build would quietly hide that.
+  autoInterpret: 'skuzic_auto_interpret_v2',
   abTest: 'skuzic_ab_test',
   backend: 'skuzic_backend',
   // Versioned for the same reason as `config`: a stored pick from an earlier
   // build outranks the default forever, so a changed default needs a new key.
-  plannerModel: 'skuzic_planner_model_v2',
+  plannerModel: 'skuzic_planner_model_v3',
   plannerConfig: 'skuzic_planner_config_v2',
   masterVolume: 'skuzic_master_volume',
   inkColor: 'skuzic_ink_color',
   brushSize: 'skuzic_brush_size',
   brushOpacity: 'skuzic_brush_opacity',
+  paperSound: 'skuzic_paper_sound',
   theme: 'skuzic_theme',
+  mixerOpen: 'skuzic_mixer_open',
   // Versioned because `load` merges a stored record *over* the defaults, so a
   // saved config from an earlier build silently wins forever. The key, tempo
   // and guidance in INITIAL_CONFIG are the sound of the instrument, not a user

@@ -40,28 +40,39 @@ function summarizeTimings(t: LogEntryTimings): string {
   return parts.join(' · ');
 }
 
+const KNOBS: Record<string, (v: unknown) => string> = {
+  density: (v) => `energy ${Math.round(Number(v) * 100)}%`,
+  brightness: (v) => `brightness ${Math.round(Number(v) * 100)}%`,
+  bpm: (v) => `tempo ${Math.round(Number(v))}`,
+  guidance: (v) => `follow the words ${Number(v).toFixed(1)}`,
+  muteDrums: (v) => (v ? 'drums off' : 'drums on'),
+  muteBass: (v) => (v ? 'bass off' : 'bass on'),
+  scale: () => 'new key',
+};
+
+/** What an action did, in the words the mixer uses. */
 function summarize(action: Action): string {
   switch (action.type) {
     case 'ADD_TRACK':
-      return `+ ${action.label}`;
+      return `added ${action.label}`;
     case 'REMOVE_TRACK':
-      return `− ${action.target}`;
+      return 'removed a sound';
     case 'MODIFY_TRACK':
-      return `~ ${action.target}`;
+      return 'rewrote a sound';
     case 'SET_VOLUME':
-      return `${action.target} → ${Math.round(action.volume * 100)}`;
+      return `a sound to ${Math.round(action.volume * 100)}`;
     case 'SET_MUTED':
-      return `${action.target} ${action.muted ? 'muted' : 'live'}`;
+      return action.muted ? 'turned a sound off' : 'turned a sound on';
     case 'SET_CONFIG':
       return Object.entries(action.config)
-        .map(([k, v]) => `${k}=${typeof v === 'number' ? v.toFixed(2) : v}`)
-        .join(' ');
+        .map(([k, v]) => KNOBS[k]?.(v) ?? k)
+        .join(' · ');
     case 'SET_BACKEND':
-      return `backend → ${action.backend}`;
+      return `engine: ${action.backend}`;
     case 'CLEAR_TRACKS':
-      return 'clear all';
+      return 'new mix';
     case 'RESET_CONTEXT':
-      return 'reset';
+      return 'fresh start';
   }
 }
 
@@ -102,17 +113,17 @@ function Row({ entry }: { entry: LogEntry }) {
             !detail && 'invisible',
           )}
         />
-        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-          {entry.actions?.length ? (
-            <div className="flex flex-wrap gap-1.5">
+        <div className="flex min-w-0 flex-1 flex-col gap-2">
+          <span className="text-[13px] leading-snug">{entry.event}</span>
+          {!!entry.actions?.length && (
+            <div className="flex flex-wrap gap-1">
               {entry.actions.map((action, i) => (
-                <Badge key={i}>{summarize(action)}</Badge>
+                <Badge key={i} className="font-sans text-[11px]">
+                  {summarize(action)}
+                </Badge>
               ))}
             </div>
-          ) : (
-            <span className="text-[13px] text-muted-foreground">no change</span>
           )}
-          <span className="truncate text-[12px] text-muted-foreground/60">{entry.event}</span>
         </div>
       </summary>
 
@@ -133,14 +144,14 @@ function Row({ entry }: { entry: LogEntry }) {
 export function ActionLog({ entries }: { entries: LogEntry[] }) {
   if (!entries.length) {
     return (
-      <p className="rounded-2xl bg-card px-4 py-5 text-sm text-muted-foreground">
-        Each pass the planner makes will appear here.
+      <p className="rounded-2xl bg-card px-4 py-5 text-[13px] text-muted-foreground">
+        Every change to the music shows up here, with the reason for it.
       </p>
     );
   }
 
   return (
-    <div className="scrollbar-thin flex max-h-[28rem] flex-col gap-1 overflow-y-auto">
+    <div className="flex flex-col gap-1.5">
       {entries.map((entry) => (
         <Row key={entry.id} entry={entry} />
       ))}
