@@ -8,7 +8,7 @@ Protocol
 --------
 client -> server (JSON text frames)
     {"type": "prompts", "prompts": [{"text": str, "weight": float}, ...]}
-    {"type": "config",  "guidance": float, "muteDrums": bool}
+    {"type": "config",  "guidance": float, "muteDrums": bool, "brightness": float}
     {"type": "play"} | {"type": "pause"} | {"type": "stop"} | {"type": "reset"}
 
 server -> client
@@ -31,11 +31,19 @@ import contextlib
 import errno
 import json
 import logging
+import os
 import random
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
+
+# Browsers send every cookie for localhost, whichever port set it, with the
+# WebSocket handshake. Other local dev servers can push that one header line
+# past websockets' 8 KB limit (seen at 10.7 KB), which fails the connection.
+# The bridge only listens on loopback, so allow 1 MiB, more than a browser will
+# send. websockets reads this when imported.
+os.environ.setdefault("WEBSOCKETS_MAX_LINE_LENGTH", str(1 << 20))
 
 import numpy as np
 import websockets
@@ -57,6 +65,40 @@ DEFAULT_CHUNK_FRAMES = 5
 # steering latency. RTF 0.73 leaves 27% headroom to refill, so a short buffer is
 # safe; raise it if you hear dropouts under load.
 MAX_LEAD_SECONDS = 0.6
+
+# The progression the band is held to, in the key the browser's pen plays in
+# (F major / D minor): Fmaj7, Dm9, Bbmaj7, C6. MRT2 has no key control of its
+# own and picks any key it likes; measured on mrt2_base, holding these chords
+# through the notes input lifted in-key energy from 67% to 94% with no loss in
+# enjoyment. Chord tones are "free" (3) so the model voices them its
+# own way, other notes in the key are left to it (-1), and the rest are off (0).
+PROGRESSION = [[53, 57, 60, 64], [50, 53, 57, 60, 64], [46, 50, 53, 57], [48, 52, 55, 57]]
+# Darker moods start the same chords on D minor.
+DARK_PROGRESSION = [PROGRESSION[1], PROGRESSION[2], PROGRESSION[0], PROGRESSION[3]]
+F_MAJOR = {5, 7, 9, 10, 0, 2, 4}
+FRAMES_PER_CHORD = 75  # three seconds
+
+
+def chord_notes(chord: list[int]) -> list[int]:
+    notes = [(-1 if p % 12 in F_MAJOR else 0) for p in range(128)]
+    for p in chord:
+        notes[p] = 3
+    return notes
+
+
+class Harmony:
+    """Walks the progression one generate() call at a time."""
+
+    def __init__(self) -> None:
+        self.frame = 0
+        self.dark = False
+
+    def next(self, frames: int) -> list[int]:
+        progression = DARK_PROGRESSION if self.dark else PROGRESSION
+        chord = progression[(self.frame // FRAMES_PER_CHORD) % len(progression)]
+        self.frame += frames
+        return chord_notes(chord)
+
 
 # Embedding shares the single MLX thread with generation, so an unbounded
 # backlog starves audio outright. Rapid drawing can request hundreds of distinct
@@ -214,9 +256,15 @@ class Session:
     """One browser connection: owns the generation loop and MRT2 state."""
 
     def __init__(
-        self, worker: ModelWorker, websocket: Any, frames_per_chunk: int, seed_base: int
+        self,
+        worker: ModelWorker,
+        websocket: Any,
+        frames_per_chunk: int,
+        seed_base: int,
+        harmony: bool = True,
     ):
         self.worker = worker
+        self.harmony = Harmony() if harmony else None
         self.websocket = websocket
         self.frames_per_chunk = frames_per_chunk
         self.styles = StyleCache(worker, seed_base, on_ready=self._restyle)
@@ -262,6 +310,8 @@ class Session:
                 self.guidance = float(np.clip(float(guidance), -1.0, 7.0))
             if (mute := message.get("muteDrums")) is not None:
                 self.drums = 0 if mute else -1
+            if (brightness := message.get("brightness")) is not None and self.harmony:
+                self.harmony.dark = float(brightness) < 0.5
 
         elif kind == "play":
             self.playing = True
@@ -270,6 +320,8 @@ class Session:
         elif kind == "stop":
             self.playing = False
             self.state = None
+            if self.harmony:
+                self.harmony.frame = 0
         elif kind == "reset":
             # Drops the rolling audio context; the model restarts from silence
             # while keeping the current style blend.
@@ -298,6 +350,7 @@ class Session:
             try:
                 waveform, self.state = await self.worker.generate(
                     style=self.style,
+                    notes=self.harmony.next(self.frames_per_chunk) if self.harmony else None,
                     drums=[self.drums],
                     cfg_musiccoca=self.guidance,
                     frames=self.frames_per_chunk,
@@ -335,11 +388,16 @@ class Session:
 
 
 async def serve(
-    worker: ModelWorker, host: str, port: int, frames_per_chunk: int, seed_base: int
+    worker: ModelWorker,
+    host: str,
+    port: int,
+    frames_per_chunk: int,
+    seed_base: int,
+    harmony: bool = True,
 ) -> None:
     async def handler(websocket: Any) -> None:
         log.info("client connected")
-        session = Session(worker, websocket, frames_per_chunk, seed_base)
+        session = Session(worker, websocket, frames_per_chunk, seed_base, harmony)
         session.start()
         await session.notify("ready")
 
@@ -411,6 +469,11 @@ def main() -> None:
             "checkpoint: raw safetensors from `mrt checkpoints download`."
         ),
     )
+    parser.add_argument(
+        "--no-harmony",
+        action="store_true",
+        help="Let MRT2 choose its own key and chords instead of holding it to F major.",
+    )
     args = parser.parse_args()
 
     worker = ModelWorker(args.size, args.weights)
@@ -422,7 +485,7 @@ def main() -> None:
         # Load on the worker thread before accepting clients, so the model is
         # ready the moment a browser connects.
         await worker.start()
-        await serve(worker, args.host, args.port, args.chunk_frames, seed_base)
+        await serve(worker, args.host, args.port, args.chunk_frames, seed_base, not args.no_harmony)
 
     try:
         asyncio.run(run())

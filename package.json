@@ -9,6 +9,7 @@
     "onlyBuiltDependencies": [],
     "ignoredBuiltDependencies": [
       "@google/genai",
+      "onnxruntime-node",
       "protobufjs"
     ]
   },
@@ -21,6 +22,7 @@
   },
   "dependencies": {
     "@google/genai": "^2.13.0",
+    "@huggingface/transformers": "^4.3.0",
     "@radix-ui/react-label": "^2.1.15",
     "@radix-ui/react-select": "^2.3.7",
     "@radix-ui/react-separator": "^1.1.15",

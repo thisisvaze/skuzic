@@ -125,11 +125,13 @@ export class MagentaEngine implements MusicEngine {
 
   async setConfig(config: MixConfig): Promise<void> {
     // Only the parameters MRT2 actually conditions on. guidance maps onto
-    // cfg_musiccoca; the bridge rescales it.
+    // cfg_musiccoca; the bridge rescales it. Brightness picks which way round
+    // the bridge plays its held chord progression (darker moods start minor).
     this.send({
       type: 'config',
       guidance: config.guidance,
       muteDrums: config.muteDrums,
+      brightness: config.brightness,
     });
   }
 

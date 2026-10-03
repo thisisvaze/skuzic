@@ -1,0 +1,148 @@
+{
+  "ground": { "lyria": "dreamy lo-fi hip hop", "magenta": "lo-fi hip hop" },
+  "moodWeight": { "lyria": 0.45, "magenta": 0.8 },
+  "moods": [
+    {
+      "id": "intro",
+      "label": "a fresh page",
+      "prompt": "soft and unhurried",
+      "density": 0.3,
+      "brightness": 0.6,
+      "tags": []
+    },
+    {
+      "id": "sunny",
+      "label": "sunshine",
+      "prompt": "radiant and uplifting",
+      "density": 0.5,
+      "brightness": 0.8,
+      "tags": ["the sun", "a sun with rays", "a bright sunny sky", "a summer day"]
+    },
+    {
+      "id": "rainy",
+      "label": "rain",
+      "prompt": "gentle and bittersweet",
+      "density": 0.4,
+      "brightness": 0.35,
+      "tags": ["rain falling from clouds", "a stormy sky with lightning", "an umbrella in the rain", "dark grey clouds"]
+    },
+    {
+      "id": "night",
+      "label": "night sky",
+      "prompt": "hushed and starlit",
+      "density": 0.3,
+      "brightness": 0.45,
+      "tags": ["the moon and stars", "a crescent moon", "a starry night sky", "an owl at night"]
+    },
+    {
+      "id": "love",
+      "label": "love",
+      "prompt": "heartfelt and intimate",
+      "density": 0.35,
+      "brightness": 0.7,
+      "tags": ["a heart", "two hearts", "hearts and flowers", "a love letter"]
+    },
+    {
+      "id": "water",
+      "label": "water",
+      "prompt": "flowing and serene",
+      "density": 0.4,
+      "brightness": 0.6,
+      "tags": ["waves on the sea", "a boat on the water", "a fish swimming", "a flowing river", "wavy lines"]
+    },
+    {
+      "id": "nature",
+      "label": "nature",
+      "prompt": "airy and peaceful",
+      "density": 0.45,
+      "brightness": 0.7,
+      "tags": ["a tree", "flowers in a garden", "mountains and hills", "a leaf", "a forest"]
+    },
+    {
+      "id": "home",
+      "label": "home and city",
+      "prompt": "cozy and nostalgic",
+      "density": 0.5,
+      "brightness": 0.5,
+      "tags": ["a house", "buildings in a city", "a car on a street", "a window in a cozy room"]
+    },
+    {
+      "id": "creatures",
+      "label": "creatures",
+      "prompt": "playful and bouncy",
+      "density": 0.5,
+      "brightness": 0.75,
+      "tags": ["a cat", "a dog", "a bird", "a butterfly", "a smiling face"]
+    },
+    {
+      "id": "energy",
+      "label": "energy",
+      "prompt": "buoyant and lively",
+      "density": 0.7,
+      "brightness": 0.65,
+      "tags": ["a messy scribble", "a tangled scribble", "a spiral", "a jagged zigzag"]
+    }
+  ],
+  "instruments": [
+    {
+      "id": "rhodes",
+      "label": "Rhodes",
+      "prompt": "warm Rhodes chords",
+      "tags": ["a house", "a window", "a city street", "a cup of coffee", "rain on a window"]
+    },
+    {
+      "id": "piano",
+      "label": "felt piano",
+      "prompt": "soft felt piano melody",
+      "tags": ["a heart", "a teardrop", "falling rain", "a candle", "a quiet empty room"]
+    },
+    {
+      "id": "guitar",
+      "label": "acoustic guitar",
+      "prompt": "warm acoustic guitar strumming gently",
+      "tags": ["a tree", "a field of grass", "a campfire", "a country road", "the sun over hills"]
+    },
+    {
+      "id": "kalimba",
+      "label": "kalimba",
+      "prompt": "playful kalimba melody",
+      "tags": ["flowers", "a butterfly", "a smiling sun", "sweets", "a small bird"]
+    },
+    {
+      "id": "pads",
+      "label": "synth pads",
+      "prompt": "soft synth pads swelling",
+      "tags": ["the night sky", "the moon", "outer space", "planets", "soft clouds"]
+    },
+    {
+      "id": "glockenspiel",
+      "label": "glockenspiel",
+      "prompt": "twinkling glockenspiel",
+      "tags": ["stars", "snowflakes", "sparkles", "fireflies", "a starry sky"]
+    },
+    {
+      "id": "strings",
+      "label": "strings",
+      "prompt": "lush legato strings",
+      "tags": ["mountains", "a sunset", "two hearts", "a castle", "a wide landscape"]
+    },
+    {
+      "id": "harp",
+      "label": "harp",
+      "prompt": "gentle harp arpeggios",
+      "tags": ["waves", "a river", "a fish", "a waterfall", "a lake"]
+    },
+    {
+      "id": "flute",
+      "label": "flute",
+      "prompt": "airy wooden flute",
+      "tags": ["a bird", "wind blowing", "a forest", "a meadow", "a kite"]
+    },
+    {
+      "id": "vibes",
+      "label": "vibraphone",
+      "prompt": "mellow vibraphone",
+      "tags": ["a city at night", "a car", "a street lamp", "a cat", "a cafe"]
+    }
+  ]
+}

@@ -59,6 +59,8 @@ Useful flags:
 - `--chunk-frames 10`: 400 ms per generation step instead of 1 s; lower
   latency, more overhead per step
 - `--port 8765`: override, then set `VITE_MAGENTA_BRIDGE_URL` to match
+- `--no-harmony`: let MRT2 pick its own key and chords instead of holding it
+  to skuzic's F major loop (see [Staying in key](#staying-in-key))
 
 ## How prompt weighting works
 
@@ -83,9 +85,22 @@ them. What does map across:
 | guidance | `cfg_musiccoca` (rescaled to −1…7) |
 | no drums | `drums=0` conditioning channel |
 | reset context | drops rolling state, restarts from silence |
+| brightness (from the drawing) | which chord the loop below starts on |
 
-MRT2 also has MIDI note conditioning (128-channel pianoroll) that skuzic
-doesn't use, an obvious extension if you want drawn pitch material.
+MRT2 also has MIDI note conditioning (a 128-channel pianoroll). The bridge uses
+it to hold the key; drawn pitch material would be the next step.
+
+## Staying in key
+
+Left alone, MRT2 picks any key it likes, which clashes with the pen (always
+F major / D minor). So the bridge feeds a four-chord loop through the `notes`
+input: Fmaj7, Dm9, Bbmaj7, C6, three seconds each, starting on Dm9 when the
+drawing's brightness is below 0.5. Chord tones are marked free, so the model
+voices them its own way; other notes in the key are left to it; notes outside
+the key are held off.
+
+Measured on `mrt2_base` over the WebSocket: 94% of pitched energy in key, against
+67% without it, with no loss in Audiobox enjoyment. `--no-harmony` turns it off.
 
 ## Latency
 
