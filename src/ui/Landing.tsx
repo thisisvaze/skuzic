@@ -221,7 +221,7 @@ export function Landing({
               Source
             </a>
             <a href={`${GITHUB}/blob/main/LICENSE.md`} target="_blank" rel="noreferrer" className="hover:text-foreground">
-              Free for personal use
+              MIT license
             </a>
           </span>
         </footer>

@@ -33,8 +33,8 @@ body:
   - type: textarea
     id: logs
     attributes:
-      label: Logs, action log, or recording
-      description: Browser console output, the in-app action log, or a short screen recording. Remove any API keys first.
+      label: Logs, History tab, or recording
+      description: Browser console output, the mixer's History tab, or a short screen recording. Remove any API keys first.
   - type: input
     id: env
     attributes:
