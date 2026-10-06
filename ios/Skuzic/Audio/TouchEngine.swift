@@ -563,25 +563,34 @@ private extension TouchEngine {
 
         /// Wires `node` into `targets`, mixers on their next free input. The
         /// non-throwing connect is deprecated from iOS 27 and its replacement needs
-        /// iOS 27, so every connection comes through here.
+        /// iOS 27, so every connection comes through here. Older SDKs (Xcode 26,
+        /// still CI's default) don't have the replacement at all, hence the #if.
         private func link(_ node: AVAudioNode, to targets: AVAudioNode..., format: AVAudioFormat) throws {
             let points = targets.map {
                 AVAudioConnectionPoint(node: $0, bus: ($0 as? AVAudioMixerNode)?.nextAvailableInputBus ?? 0)
             }
+            #if compiler(>=6.4)
             if #available(iOS 27, macOS 27, *) {
                 try engine.connectNode(node, to: points, fromBus: 0, format: format)
             } else {
                 engine.connect(node, to: points, fromBus: 0, format: format)
             }
+            #else
+            engine.connect(node, to: points, fromBus: 0, format: format)
+            #endif
         }
 
         /// Same story as `link`: `play` is deprecated from iOS 27, `playAudio` needs it.
         private static func play(_ player: AVAudioPlayerNode, at time: AVAudioTime? = nil) {
+            #if compiler(>=6.4)
             if #available(iOS 27, macOS 27, *) {
                 try? player.playAudio(at: time)
             } else {
                 player.play(at: time)
             }
+            #else
+            player.play(at: time)
+            #endif
         }
 
         /// A mono bus panned to exactly 0 plays at full level on both sides, 3 dB
