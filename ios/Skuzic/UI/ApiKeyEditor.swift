@@ -26,10 +26,10 @@ struct ApiKeyEditor: View {
             .font(.system(size: 12))
 
             Text(store.hasKey
-                 ? "saved on this device — not in the app binary"
-                 : "needed to play. Stays on this device.")
-                .font(.system(size: 10.5))
-                .foregroundStyle(.white.opacity(0.35))
+                 ? "Saved on this device, not in the app."
+                 : "Needed to play. It stays on this device.")
+                .font(.system(size: 12))
+                .foregroundStyle(Theme.inkMuted)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .onAppear { draft = Preferences.apiKey }

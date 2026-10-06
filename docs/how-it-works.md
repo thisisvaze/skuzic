@@ -53,10 +53,24 @@ the playing one, so a half-drawn shape doesn't swap the band on every stroke.
 An instrument swaps only when a challenger beats the weaker of the two by 12
 points, one at a time, so the other plays straight through the change (the
 mixer keys on prompt text). An empty page, or first marks it can't place yet,
-play the intro: "soft and unhurried" with Rhodes. How much ink is down and how
-warm its colours are (`src/vision/ink.ts`) nudge density and brightness on
-every reading, so the music grows as the page fills. A Gemini arrangement
+play the vibe's opening: "soft and unhurried" over its first instrument. How
+much ink is down and how warm its colours are (`src/vision/ink.ts`) nudge
+density and brightness on every reading, so the music grows as the page fills. A Gemini arrangement
 survives until the drawing reads as something new.
+
+The artist can start from a **vibe** (`vibes` in `palette.json`, picked on the
+blank page or in the mixer). A vibe sets the style layer for each engine, the
+instruments it opens with, the only instruments a drawing may bring in, and its
+tempo and drums. So a string quartet never grows a kalimba, and solo piano has
+no instruments at all, only its style and the mood.
+
+On a blank page, tapping a vibe plays a short loop of it at once
+(`public/sounds/vibes/`, rendered by `scripts/make-vibe-previews.py`) and lays
+its channels out in the mixer. The band itself starts on the first mark, in the
+vibe's tempo, and the loop bows out as soon as the band is audible. "Just draw"
+fades back to silence. With a drawing already on the page, picking a vibe
+switches the band straight away. Wiping the page fades the band out over three
+seconds rather than cutting it, and the next mark brings it back.
 
 This shape won a listening test: four drawings, seven prompt styles, both
 engines, scored with Audiobox Aesthetics plus an in-key measure. One sentence
@@ -71,6 +85,13 @@ The q4 export is deliberate: every half-precision export (fp16, q4f16) drifts
 to about 0.6 cosine against PyTorch on this model, while q4 holds 0.97. Measured
 at 21 to 30 ms a read on WebGPU and 0.7 s on WASM, and it put 12 of 12 test
 drawings (four saved sketches, eight simple doodles) in the right mood.
+
+On iPad the same image model runs on the device through Core ML, and
+`ios/Skuzic/Vision/` is a port of `eyes.ts`. `scripts/make-siglip-coreml.py`
+converts it with 4-bit weights in blocks of 16: about 59 MB, 0.977 cosine
+against PyTorch, and the same mood on all 12 test drawings. The app links the
+web's palette files rather than copying them, so the two can't drift apart. The
+4-bit model needs iOS 18; on iOS 17, lifting the pen asks Gemini instead.
 
 ## The pen's own sound
 
@@ -94,7 +115,9 @@ its own AudioContext so it plays while the bed is paused or still connecting.
   once (rising for bright moods, falling for dark ones), covering the seconds
   the band takes to follow. Clearing the page is a soft swish.
 
-`LEVEL` is the one knob for balancing it against the bed by ear.
+`LEVEL` is the one knob for balancing it against the bed by ear. The iPad
+plays the same pen (`ios/Skuzic/Audio/TouchEngine.swift`, on AVAudioEngine),
+driven by the Pencil's own pressure and every sample it takes.
 
 ## Backends
 

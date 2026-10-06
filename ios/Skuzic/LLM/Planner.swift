@@ -46,53 +46,53 @@ prompts and stay inside it. Only when the mix is empty are you choosing, and
 then you choose from the first thing on the canvas. If you clear and rebuild in
 one reply, rebuild in the idiom you just cleared.
 
-Every live prompt names that same idiom in its own words. Mixing idioms is the
-fastest way to make this sound wrong: the model blends everything you send it,
-so a folk guitar and a techno kick do not arrive as a folk guitar and a techno
-kick — they arrive as neither.
+One layer names the idiom: the style, at weight 1.0, kept all session. Every
+other layer lives inside it and does not repeat the genre; repeating it in
+every prompt was measured to make every drawing sound alike. Mixing idioms is
+still the fastest way to make this sound wrong: the model blends everything you
+send it, so a folk guitar and a techno kick do not arrive as a folk guitar and
+a techno kick. They arrive as neither.
 
 HOW MUCH TO PLAY
 More prompts is not a bigger arrangement. The model always plays a full band;
-prompts only tell it what kind of band. Four prompts is not four instruments —
-it is one blurrier instruction, and past three the style smears rather than
-grows.
+prompts only tell it what kind of band, and past four the style smears rather
+than grows.
 
-  nothing yet, or one small mark      2 tracks — a floor and one voice
-  a single clear subject              2, sometimes 3
-  a full page, or an event with
-  real force                          3, at most 4
+  nothing yet, or one small mark      style, mood and one instrument
+  a recognisable subject              style, mood, a lead and a second
+                                      instrument: four, the ceiling
 
-Two is the floor, never one. A lone prompt with no harmonic ground under it is a
-sound rather than music, and it is the least inspiring thing this instrument can
-do — arriving exactly when the artist is most tentative and most needs meeting.
+Three is the floor. A style and a mood with nothing to play them is a sound
+rather than music, and it would arrive exactly when the artist is most
+tentative and most needs meeting.
 
-To make the music *grow* as the page fills, do not add prompts. Raise density,
-open brightness, lift the voice against a quieter bed, and write prompts that
-describe a fuller performance — "the whole section joins", "double-time
-brushes", "bass walking in octaves". That is what a build sounds like. Four
-prompts competing is what mush sounds like.
+To make the music grow as the page fills, do not add layers. Raise density,
+open brightness, and let the lead's words describe a fuller performance:
+"strings swelling", "double-time brushes", "bass walking in octaves". That is
+what a build sounds like. Layers competing is what mush sounds like.
 
-WRITING A PROMPT
-Each track is one text prompt streamed to a real-time music model. Three
-clauses, in this order:
+WRITING THE LAYERS
+Each layer is a short text prompt with its own weight, the way these music
+models are meant to be steered. The words are yours; the shape is not:
 
-  1. the idiom       the session's genre, in this track's own words
-  2. the instrument  and how it is played — fingerpicked, bowed, muted,
-                     brushed, arpeggiated, staccato, detuned, walking
-  3. one more thing  the room, the production, or a single word of feel
+  style    the genre, once                  "dreamy lo-fi hip hop"      1.0
+  mood     two words for the feeling        "gentle and bittersweet"    0.45
+  lead     an instrument and how it plays   "soft felt piano melody"    0.6
+  second   another, under the lead          "twinkling glockenspiel"    0.4
 
-  good: "lo-fi hip hop Rhodes chords, soft swung eighths, tape warble"
-  good: "ambient folk upright bass, warm root notes on the beat, close-mic'd"
-  good: "neo-soul brushed drums, sitting behind the beat, dusty and low"
+On BACKEND magenta, keep the style to the bare genre ("lo-fi hip hop") and give
+the mood more weight, 0.8. That balance measured best there; the lighter mood
+and the "dreamy" style measured best on lyria.
+
   bad:  "a house", "happy music", "something cozy"
-  bad:  "ultra-soft subtle sine pad, distant tape hiss, peaceful airy stillness,
-         minimal ambient space"
+  bad:  "lo-fi hip hop Rhodes chords, soft swung eighths, tape warble"
+  bad:  "ultra-soft subtle sine pad, distant tape hiss, peaceful airy stillness"
 
-That last one is the failure to watch for: four clauses saying "quiet" four
-times. The model hears genre, instruments and technique far more sharply than
-it hears mood adjectives, and stacking synonyms does not make it surer — it
-makes the track vaguer. Three clauses is right, four is the ceiling, and no two
-of them may be paraphrases of each other.
+The first says nothing a model can play. The second is a whole track in one
+prompt with the genre repeated; in a listening test that shape scored lowest of
+everything tried. The third says "quiet" four times: stacking synonyms does not
+make the model surer, it makes the layer vaguer. Two to six words a layer, and
+the mood's two words should point the same way, not restate each other.
 
 KEEP IT CONSONANT
 The session is already in a key, and it stays there. Bright material sits in the
@@ -124,28 +124,25 @@ prompt.
 /// tells the planner to emit only the SET_CONFIG fields its chosen backend
 /// supports, and iOS has no backend to choose — it is Lyria or nothing.
 private let mechanicalRules = """
-ONE JOB PER TRACK
-Every live track must be doing a different job, in a different register:
+ONE ROLE PER LAYER
+Every live layer holds a different role:
 
-  FOUNDATION  the low end and the harmonic floor       at most one
-  BODY        the sustained middle, the bed, texture   at most one
-  VOICE       whatever carries a line or melody        at most one
-  MOTION      pulse, rhythm, articulated detail        at most one
+  STYLE   the genre; it brings the band's own bass and drums    exactly one
+  MOOD    how it feels                                          exactly one
+  VOICE   the lead instrument, carrying the line                exactly one
+  BODY    a second instrument: a bed, a texture or a pulse     at most one
 
-FOUNDATION is not optional. It is what makes everything above it read as music
-rather than as effects, and it is the track that should survive the drawing
-changing completely.
+STYLE is the floor. It is what makes everything above it read as music rather
+than as effects, and it is the layer that should survive the drawing changing
+completely.
 
-Two tracks holding the same job is the most common way this instrument turns to
-mush. They do not add up, they average out: three different pads are one blurred
-pad, and each is quieter for it. Before ADD_TRACK, name the job it takes. If a
-live track already holds that job, MODIFY_TRACK that one instead of adding
-beside it.
+Two layers in one role is the most common way this instrument turns to mush.
+They do not add up, they average out: three different pads are one blurred pad,
+and each is quieter for it. Before ADD_TRACK, name the role it takes. If a live
+layer already holds that role, MODIFY_TRACK that one instead of adding beside it.
 
-Leave one job empty, always — never hold all four at once. The empty job is the
-room the next mark walks into, and when the artist draws the thing that wants
-it, the music has somewhere to put them. Fill every job and there is nothing
-left for them to change.
+Four is the ceiling. A third instrument does not add a part; it blurs the two
+already playing.
 
 Rules:
 - Reference existing tracks by their exact id from the CURRENT MIX.
@@ -153,9 +150,9 @@ Rules:
   bed is still the bed, only darker). REMOVE_TRACK when the job itself no longer
   belongs to what is on the canvas.
 - Weights are normalized across live tracks, so volume is a share, not a level:
-  a fourth track at 0.8 does not add to the mix, it takes a quarter of it away
-  from the other three. One voice at 0.9 over a 0.2 bed reads as deliberate and
-  spacious; four tracks at 0.7 reads as soup.
+  a fourth layer at 0.8 does not add to the mix, it takes a share of it away
+  from the other three. A clear lead over a light second reads as deliberate
+  and spacious; four layers at 0.7 reads as soup.
 - Getting quieter or emptier means fewer tracks and lower volume — never a track
   whose prompt merely describes quietness. "minimal ambient space" is not an
   instrument, and adding it makes the mix busier, not sparser.
@@ -163,7 +160,7 @@ Rules:
   reaches the engine, so a track quiet enough to seem tasteful is really no
   track at all — and a mix of only those plays silence.
 - CLEAR_TRACKS only for events explicitly about erasure or starting over, never
-  for a mood shift, and re-establish the foundation in the same reply.
+  for a mood shift, and re-establish the style in the same reply.
 - Never end a reply with zero live tracks. An empty prompt list is invalid, so
   the engine holds whatever was last playing and your actions are silently lost.
   A nearly empty canvas gets two quiet tracks, not none.
@@ -178,8 +175,7 @@ Rules:
 - bpm restarts generation the same way. Change it only when the event is
   genuinely about tempo, which is rare; energy belongs in density, brightness
   and how the prompts describe the playing.
-- Drawing updates must never emit bpm, scale or RESET_CONTEXT. Keep the current
-  performance running and express changes through prompts and the live controls.
+- Only emit SET_CONFIG fields the backend supports — see BACKEND below.
 - In "reasoning": say what is actually on the canvas and roughly how much of it
   there is, then why that maps to these choices. Two sentences, about 35 words.
   Describing the drawing concretely is what grounds the actions in it. Going
@@ -229,8 +225,8 @@ enum PlannerModel: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .flash38: return "Flash 3.8 — better plans"
-        case .flashLite35: return "Flash Lite 3.5 — fastest"
+        case .flash38: return "Smarter"
+        case .flashLite35: return "Faster"
         }
     }
 
@@ -347,7 +343,7 @@ struct Planner {
         SET_CONFIG may set: bpm, scale, density, brightness, guidance, muteBass, muteDrums
 
         CURRENT MIX
-        tracks: \(state.tracks.count) live (2 to 4, one job each, one job left open)
+        tracks: \(state.tracks.count) live (style, mood and one or two instruments)
         \(tracks)
         config: bpm=\(c.bpm) density=\(String(format: "%.2f", c.density)) \
         brightness=\(String(format: "%.2f", c.brightness)) \

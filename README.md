@@ -22,14 +22,19 @@ you draw a house
   → Lyria RealTime plays the new sound, live
 ```
 
+On a blank page you can start from a vibe: lo-fi, ambient, solo piano, indie
+folk, bossa nova, a jazz café or a string quartet. Tap one to hear a short
+preview; your first stroke starts the band in it, and your drawing then moves
+the mood inside it. Or just draw, and let the page pick. Wipe the page and the
+band winds down to silence.
+
 Want to steer it yourself? Open the **Mixer**. Every sound is a fader you can
 turn up, switch off or rewrite in plain words, and knobs like Energy and
 Brightness do what they say. Or tap **Reimagine** and Gemini rewrites the whole
 arrangement from your drawing.
 
-Works in the browser and on iPad/iPhone; the pen's sound and the in-browser
-reading are web-only for now. On a Mac you can also generate the audio locally
-with Google's open Magenta RT2 model.
+Works in the browser and on iPad/iPhone, pen sound and all. On a Mac you can
+also generate the audio locally with Google's open Magenta RT2 model.
 
 ## Try it
 
@@ -51,9 +56,9 @@ paste the same kind of key. It lives in the Keychain, not the app binary.
 
 skuzic is early and there's a lot of fun stuff left to make:
 
-- 🎛️ **Give it taste.** `src/vision/palette.json` holds the moods and
-  instruments a drawing can turn into. Add a mood like "snow" or an instrument
-  you love; you don't need to know anything about audio.
+- 🎛️ **Give it taste.** `src/vision/palette.json` holds the vibes, moods and
+  instruments a drawing can turn into. Add a vibe, a mood like "snow", or an
+  instrument you love; you don't need to know anything about audio.
 - ✏️ **Read drawings better.** Right now the whole page is one picture. Where
   you draw, how fast, and how hard you press could all shape the music.
 - 🎹 **Draw melodies.** Magenta RT takes piano-roll notes. Today skuzic uses

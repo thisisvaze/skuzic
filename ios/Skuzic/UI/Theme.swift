@@ -2,15 +2,38 @@ import PencilKit
 import SwiftUI
 
 enum Theme {
-    /// Light paper with dark ink — the model reads a drawn shape far more
-    /// reliably this way than as light strokes on a dark background.
-    static let paper = Color(red: 0.957, green: 0.945, blue: 0.918)
-    static let paperUI = UIColor(red: 0.957, green: 0.945, blue: 0.918, alpha: 1)
+    /// Light paper with dark ink, the same in both themes: the model reads a
+    /// drawn shape far more reliably this way than as light strokes on dark.
+    /// Matches the web build's paper (#fcfbf8) and the ink reader's constant.
+    static let paper = Color(hex: 0xFCFBF8)
+    static let paperUI = UIColor(red: 252 / 255, green: 251 / 255, blue: 248 / 255, alpha: 1)
 
-    /// The surface the paper floats on. Dark enough that the drop shadow reads
-    /// and the paper is clearly a separate object.
-    static let workspace = Color(red: 0.09, green: 0.09, blue: 0.095)
-    static let workspaceUI = UIColor(red: 0.09, green: 0.09, blue: 0.095, alpha: 1)
+    // The web build's colour tokens (src/styles.css), light and dark: a quiet
+    // cool neutral desk, so the paper and the music's colour are the only warm
+    // things on screen. Panels float on the desk; cards sit inside panels.
+    static let desk = adaptive(0xEFF0F3, 0x131417)
+    static let deskUI = adaptiveUI(0xEFF0F3, 0x131417)
+    static let panel = adaptive(0xFDFDFE, 0x1C1D21)
+    static let card = adaptive(0xF2F3F6, 0x26272C)
+    static let secondary = adaptive(0xE8E9EE, 0x2E2F35)
+    static let muted = adaptive(0xE3E4EA, 0x34353B)
+    static let ink = adaptive(0x1A1B20, 0xF2F3F5)
+    static let inkMuted = adaptive(0x686A73, 0xA3A5AE)
+    static let input = adaptive(0xECEDF1, 0x232428)
+    static let border = Color(UIColor { $0.userInterfaceStyle == .dark
+        ? UIColor.white.withAlphaComponent(0.09) : UIColor.black.withAlphaComponent(0.09) })
+    /// Dims the paper a touch in dark mode so it doesn't glare. Laid over the
+    /// canvas, never baked in, so what the eyes read stays as drawn.
+    static let paperDimUI = UIColor { $0.userInterfaceStyle == .dark
+        ? UIColor.black.withAlphaComponent(0.05) : .clear }
+
+    /// The wordmark's line, for the few things that are alive: the play button,
+    /// the switches, a chosen vibe. Chrome stays neutral.
+    static let brand1 = Color(hex: 0xE2711D)
+    static let brand2 = Color(hex: 0xE26D9E)
+    static let brand3 = Color(hex: 0x7C3AED)
+    static let brand = LinearGradient(colors: [brand1, brand2, brand3],
+                                      startPoint: .topLeading, endPoint: .bottomTrailing)
 
     /// Picked to stay legible against the paper once the export downsamples it.
     static let inks: [Color] = [
@@ -28,6 +51,34 @@ enum Theme {
         Color(hex: 0x8B5A2B),
     ]
 
+    private static func adaptiveUI(_ light: UInt32, _ dark: UInt32) -> UIColor {
+        UIColor { UIColor(Color(hex: $0.userInterfaceStyle == .dark ? dark : light)) }
+    }
+
+    private static func adaptive(_ light: UInt32, _ dark: UInt32) -> Color {
+        Color(adaptiveUI(light, dark))
+    }
+}
+
+/// "System", "Light" or "Dark", stored as the web build stores it.
+enum ThemeChoice: String, CaseIterable, Identifiable {
+    case system, light, dark
+    var id: String { rawValue }
+    var title: String { rawValue.capitalized }
+    var icon: String {
+        switch self {
+        case .system: return "circle.lefthalf.filled"
+        case .light: return "sun.max"
+        case .dark: return "moon"
+        }
+    }
+    var scheme: ColorScheme? {
+        switch self {
+        case .system: return nil
+        case .light: return .light
+        case .dark: return .dark
+        }
+    }
 }
 
 /// Apple's own inks, so pressure, tilt and taper come from PencilKit rather

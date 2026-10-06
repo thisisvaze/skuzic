@@ -10,6 +10,7 @@ import UIKit
 final class CanvasStage: UIView {
     let paper = UIView()
     let canvas: PKCanvasView
+    private let dim = UIView()
 
     /// Margin at rest, so the shadow is visible without zooming out.
     private let inset: CGFloat = 22
@@ -31,17 +32,29 @@ final class CanvasStage: UIView {
         self.canvas = canvas
         super.init(frame: .zero)
 
-        backgroundColor = Theme.workspaceUI
+        backgroundColor = Theme.deskUI
 
         paper.backgroundColor = Theme.paperUI
+        paper.layer.cornerRadius = 18
+        paper.layer.cornerCurve = .continuous
         paper.layer.shadowColor = UIColor.black.cgColor
-        paper.layer.shadowOpacity = 0.3
-        paper.layer.shadowRadius = 22
+        paper.layer.shadowOpacity = 0.18
+        paper.layer.shadowRadius = 24
         paper.layer.shadowOffset = CGSize(width: 0, height: 10)
         addSubview(paper)
 
         canvas.clipsToBounds = true
+        canvas.layer.cornerRadius = 18
+        canvas.layer.cornerCurve = .continuous
         paper.addSubview(canvas)
+
+        // A touch dimmer in dark mode, laid over the strokes too, like the web
+        // build's brightness filter. It never reaches the export.
+        dim.backgroundColor = Theme.paperDimUI
+        dim.isUserInteractionEnabled = false
+        dim.layer.cornerRadius = 18
+        dim.layer.cornerCurve = .continuous
+        paper.addSubview(dim)
 
         installGestures()
     }
@@ -70,6 +83,7 @@ final class CanvasStage: UIView {
         }
 
         canvas.frame = paper.bounds
+        dim.frame = paper.bounds
     }
 
     private func apply() {

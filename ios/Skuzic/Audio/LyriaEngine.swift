@@ -193,11 +193,12 @@ final class LyriaEngine: ObservableObject {
         if ready || reconnectTask != nil { setStatus(.buffering) }
     }
 
-    func pause() {
+    /// `fade` > the default lets the music wind down instead of ducking out.
+    func pause(fade: Double = 0.08) {
         playbackRequested = false
         resetID = UUID()
         resetting = false
-        scheduler?.pause()
+        scheduler?.pause(fade: fade)
         syncGeneration()
         setStatus(.paused)
     }

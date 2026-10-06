@@ -47,6 +47,18 @@ final class CanvasController: NSObject, ObservableObject {
     }
     @Published var erasing = false { didSet { applyTool() } }
 
+    /// The pen's own sound: TouchEngine, the web build's src/audio/touch.ts,
+    /// played from the touches PencilKit draws with.
+    @Published var penSound = Preferences.bool(.penSound, or: true) {
+        didSet {
+            Preferences.set(penSound, .penSound)
+            if !penSound { touch?.up(time: ProcessInfo.processInfo.systemUptime) }
+        }
+    }
+    /// The band's level, 0...1, so the pen makes room when the music is loud.
+    var meter: () -> Float = { 0 }
+    private var touch: TouchEngine?
+
     @Published private(set) var hasInk = false
     @Published private(set) var canUndo = false
     @Published private(set) var canRedo = false
@@ -56,6 +68,8 @@ final class CanvasController: NSObject, ObservableObject {
     private var strokeStartedAt: TimeInterval = 0
     var onStrokeBegin: (() -> Void)?
     var onStrokeEnd: (() -> Void)?
+    /// Fired when the page is wiped from the rail, so the band can wind down.
+    var onClear: (() -> Void)?
 
     override init() {
         super.init()
@@ -71,6 +85,10 @@ final class CanvasController: NSObject, ObservableObject {
         // PencilKit's own palm rejection handles the hand; this handles the
         // fingers. Note it also means the Simulator cannot draw at all.
         canvas.drawingPolicy = .pencilOnly
+        #if targetEnvironment(simulator)
+        // The Simulator has no Pencil; let the mouse draw so the app can be tried there.
+        canvas.drawingPolicy = .anyInput
+        #endif
         canvas.alwaysBounceVertical = false
         canvas.alwaysBounceHorizontal = false
         // The surface is exactly one screen, so scrolling and zooming have
@@ -81,6 +99,19 @@ final class CanvasController: NSObject, ObservableObject {
         canvas.maximumZoomScale = 1
         installGestures()
         applyTool()
+        // Loaded with the sketch so the first stroke already has its piano.
+        _ = sound
+    }
+
+    /// Made on first use, so a silenced pen never loads the piano.
+    private var sound: TouchEngine? {
+        guard penSound else { return nil }
+        if touch == nil {
+            let engine = TouchEngine()
+            engine.listen { [weak self] in self?.meter() ?? 0 }
+            touch = engine
+        }
+        return touch
     }
 
     /// Procreate's gestures: two fingers to undo, three to redo, anywhere on the
@@ -97,6 +128,41 @@ final class CanvasController: NSObject, ObservableObject {
         redo.numberOfTouchesRequired = 3
         redo.delegate = self
         stage.addGestureRecognizer(redo)
+
+        let listener = TouchListener(target: nil, action: nil)
+        listener.draws = { [weak self] in $0.type == .pencil || self?.canvas.drawingPolicy == .anyInput }
+        listener.began = { [weak self] in self?.penDown($0) }
+        listener.moved = { [weak self] in self?.penMoved($0) }
+        listener.ended = { [weak self] in self?.touch?.up(time: $0.timestamp) }
+        canvas.addGestureRecognizer(listener)
+    }
+
+    // MARK: - Pen sound
+
+    private func penDown(_ t: UITouch) {
+        guard let sound else { return }
+        let at = t.location(in: canvas)
+        let tool: PenTool = erasing ? .eraser : brush == .marker || brush == .watercolor ? .marker : .pencil
+        sound.down(x: at.x, y: at.y, pressure: Self.pressure(t), time: t.timestamp,
+                   width: canvas.bounds.width, height: canvas.bounds.height, tool: tool, opacity: opacity)
+    }
+
+    private func penMoved(_ samples: [UITouch]) {
+        for t in samples {
+            let at = t.location(in: canvas)
+            touch?.move(x: at.x, y: at.y, pressure: Self.pressure(t), time: t.timestamp)
+        }
+    }
+
+    /// The eyes heard a new scene: the pen answers it.
+    func cue(bright: Bool) {
+        if penSound { touch?.cue(bright: bright) }
+    }
+
+    /// A Pencil's force as 0...1. A finger or mouse has none and reads as an
+    /// even 0.5, as a mouse does on the web.
+    private static func pressure(_ t: UITouch) -> CGFloat {
+        t.maximumPossibleForce > 0 && t.force > 0 ? t.force / t.maximumPossibleForce : 0.5
     }
 
     func resetView() {
@@ -172,19 +238,27 @@ final class CanvasController: NSObject, ObservableObject {
 
     // MARK: - Commands
 
+    // Undo and redo change the page as much as a stroke does, so they report
+    // like one and the music reads the page again.
     func undo() {
         canvas.undoManager?.undo()
         refresh()
+        onStrokeEnd?()
     }
 
     func redo() {
         canvas.undoManager?.redo()
         refresh()
+        onStrokeEnd?()
     }
 
     func clear() {
+        let hadInk = hasInk
         canvas.drawing = PKDrawing()
         refresh()
+        guard hadInk else { return }
+        if penSound { touch?.clear() }
+        onClear?()
     }
 
     func load(_ drawing: PKDrawing) {
@@ -202,6 +276,12 @@ final class CanvasController: NSObject, ObservableObject {
     }
 
     var isEmpty: Bool { canvas.drawing.strokes.isEmpty }
+
+    /// The page for the eyes and the ink reader: strokes on paper, small enough
+    /// to read in milliseconds (SigLIP sees 224 x 224 anyway). Nil when blank.
+    func pageImage() -> CGImage? {
+        isEmpty ? nil : render(maxEdge: 448)?.cgImage
+    }
 
     /// The canvas can be 2732px on the long edge, but the planner only needs the
     /// shape. Downscaling before encoding shrinks the upload by an order of
@@ -276,6 +356,50 @@ extension CanvasController: PKCanvasViewDelegate {
             Diagnostics.event(.drawing, "STROKE_END elapsed_ms=\(Diagnostics.milliseconds(since: strokeStartedAt)) strokes=\(canvas.drawing.strokes.count)")
             onStrokeEnd?()
         }
+    }
+}
+
+/// Hears the touches PencilKit draws with, for the pen's sound, without taking
+/// part: it never recognizes and nothing can stop it, so drawing, pinching and
+/// the undo taps behave exactly as they would without it.
+private final class TouchListener: UIGestureRecognizer {
+    var draws: (UITouch) -> Bool = { _ in true }
+    var began: ((UITouch) -> Void)?
+    var moved: (([UITouch]) -> Void)?
+    var ended: ((UITouch) -> Void)?
+    /// One stroke at a time. Weak, so a touch that never reports its end can't
+    /// hold up the next stroke.
+    private weak var tracked: UITouch?
+
+    override init(target: Any?, action: Selector?) {
+        super.init(target: target, action: action)
+        cancelsTouchesInView = false
+        delaysTouchesBegan = false
+        delaysTouchesEnded = false
+    }
+
+    override func canPrevent(_ other: UIGestureRecognizer) -> Bool { false }
+    override func canBePrevented(by other: UIGestureRecognizer) -> Bool { false }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        guard tracked == nil, let touch = touches.first(where: draws) else { return }
+        tracked = touch
+        began?(touch)
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
+        guard let tracked, touches.contains(tracked) else { return }
+        // Every sample the Pencil took since the last frame, each with its own time.
+        moved?(event.coalescedTouches(for: tracked) ?? [tracked])
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) { finish(touches) }
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) { finish(touches) }
+
+    private func finish(_ touches: Set<UITouch>) {
+        guard let tracked, touches.contains(tracked) else { return }
+        self.tracked = nil
+        ended?(tracked)
     }
 }
 

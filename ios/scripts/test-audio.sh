@@ -27,3 +27,17 @@ xcrun swiftc -swift-version 5 -parse-as-library -warnings-as-errors \
     "$project_root/test/ios-engine.test.swift" \
     -o "$test_dir/engine-tests"
 "$test_dir/engine-tests"
+
+xcrun swiftc -swift-version 5 -parse-as-library -warnings-as-errors \
+    "$project_root/ios/Skuzic/Audio/TouchEngine.swift" \
+    "$project_root/test/ios-touch.test.swift" \
+    -o "$test_dir/touch-tests"
+"$test_dir/touch-tests"
+
+xcrun swiftc -swift-version 5 -parse-as-library -warnings-as-errors \
+    "$project_root/ios/Skuzic/Core/Types.swift" \
+    "$project_root/ios/Skuzic/Vision/Palette.swift" \
+    "$project_root/ios/Skuzic/Vision/Ink.swift" \
+    "$project_root/test/ios-palette.test.swift" \
+    -o "$test_dir/palette-tests"
+"$test_dir/palette-tests" "$project_root"

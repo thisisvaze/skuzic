@@ -15,7 +15,7 @@ struct GalleryView: View {
 
     var body: some View {
         ZStack {
-            Theme.workspace.ignoresSafeArea()
+            Theme.desk.ignoresSafeArea()
 
             ScrollView {
                 LazyVGrid(columns: columns, spacing: 24) {
@@ -45,25 +45,8 @@ struct GalleryView: View {
         }
         .statusBarHidden(true)
         .sheet(isPresented: $showSettings) {
-            NavigationStack {
-                Form {
-                    Section {
-                        ApiKeyEditor()
-                    } footer: {
-                        Text("Get a free key at aistudio.google.com/apikey. It never leaves this device.")
-                    }
-                }
-                .scrollDismissesKeyboard(.interactively)
-                .navigationTitle("Settings")
-                .toolbar {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Done") { showSettings = false }
-                    }
-                }
-            }
-            .preferredColorScheme(.dark)
-            .environmentObject(store)
-            .presentationDetents([.medium])
+            SettingsSheet { showSettings = false }
+                .environmentObject(store)
         }
         .alert("Rename sketch", isPresented: .constant(renaming != nil)) {
             TextField("Title", text: $draftTitle)
@@ -77,12 +60,11 @@ struct GalleryView: View {
 
     private var header: some View {
         HStack {
-            Text("skuzic")
-                .font(.system(size: 20, weight: .semibold))
+            Wordmark()
 
             Text("\(sketches.sketches.count)")
                 .font(.system(size: 13))
-                .foregroundStyle(.white.opacity(0.35))
+                .foregroundStyle(Theme.inkMuted)
 
             Spacer()
 
@@ -92,7 +74,7 @@ struct GalleryView: View {
                 Image(systemName: "gearshape")
                     .font(.system(size: 16, weight: .semibold))
                     .frame(width: 40, height: 34)
-                    .foregroundStyle(.white.opacity(0.7))
+                    .foregroundStyle(Theme.ink)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Settings")
@@ -103,15 +85,15 @@ struct GalleryView: View {
                 Image(systemName: "plus")
                     .font(.system(size: 16, weight: .semibold))
                     .frame(width: 40, height: 34)
-                    .background(Capsule().fill(.white))
-                    .foregroundStyle(.black)
+                    .background(Capsule().fill(Theme.ink))
+                    .foregroundStyle(Theme.panel)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("New sketch")
         }
         .padding(.horizontal, 26)
         .padding(.vertical, 16)
-        .background(Theme.workspace.opacity(0.96))
+        .background(Theme.desk.opacity(0.96))
     }
 }
 
@@ -122,19 +104,17 @@ private struct NewSketchCard: View {
         Button(action: action) {
             VStack(spacing: 10) {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .strokeBorder(
-                        .white.opacity(0.18), style: StrokeStyle(lineWidth: 1.5, dash: [7, 6])
-                    )
+                    .strokeBorder(Theme.border, style: StrokeStyle(lineWidth: 1.5, dash: [7, 6]))
                     .aspectRatio(3 / 4, contentMode: .fit)
                     .overlay(
                         Image(systemName: "plus")
                             .font(.system(size: 26, weight: .light))
-                            .foregroundStyle(.white.opacity(0.5))
+                            .foregroundStyle(Theme.inkMuted)
                     )
 
                 Text("New sketch")
                     .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.6))
+                    .foregroundStyle(Theme.inkMuted)
 
                 Text(" ")
                     .font(.system(size: 11))
@@ -165,17 +145,18 @@ private struct SketchCard: View {
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(.white.opacity(0.1), lineWidth: 0.5)
+                    .stroke(Theme.border, lineWidth: 1)
             )
-            .shadow(color: .black.opacity(0.35), radius: 12, y: 5)
+            .shadow(color: .black.opacity(0.12), radius: 12, y: 5)
 
             Text(meta.title)
                 .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Theme.ink)
                 .lineLimit(1)
 
             Text(meta.updatedAt.formatted(.relative(presentation: .named)))
                 .font(.system(size: 11))
-                .foregroundStyle(.white.opacity(0.35))
+                .foregroundStyle(Theme.inkMuted)
         }
         .contentShape(Rectangle())
     }

@@ -18,10 +18,10 @@ enum PlannerConfig: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .vibe1: return "Vibe v1"
-        case .realvibe: return "Real Vibe"
-        case .sounds: return "Sounds"
-        case .continuity: return "Continuity"
+        case .vibe1: return "Whole picture"
+        case .realvibe: return "Fresh each time"
+        case .sounds: return "Sound effects"
+        case .continuity: return "Smooth changes"
         }
     }
 
@@ -29,13 +29,13 @@ enum PlannerConfig: String, CaseIterable, Identifiable {
     var summary: String {
         switch self {
         case .vibe1:
-            return "reads the whole drawing as one scene and cuts what no longer fits"
+            return "Reads the whole drawing as one scene and drops what no longer fits."
         case .realvibe:
-            return "rebuilds the whole mix from the current drawing, every time"
+            return "Rebuilds the whole mix from the drawing, every time."
         case .sounds:
-            return "sound effects instead of music — whatever the scene would actually sound like"
+            return "Sound effects instead of music: what the scene would really sound like."
         case .continuity:
-            return "reacts to the newest change and transitions gradually"
+            return "Reacts to your newest marks and changes gradually."
         }
     }
 
@@ -62,10 +62,10 @@ enum PlannerConfig: String, CaseIterable, Identifiable {
         weight, however good it sounded on its own.
 
           belongs as it is              -> leave it alone
-          right job, wrong colour       -> MODIFY_TRACK into the new vibe
+          right role, wrong colour      -> MODIFY_TRACK into the new vibe
           belongs to a vibe that has
           left the canvas               -> REMOVE_TRACK
-          doubles a job another track
+          doubles a role another layer
           already holds                 -> REMOVE_TRACK, or fold the two into one
 
         Only then add what the current vibe needs and the mix does not already have.
@@ -90,8 +90,8 @@ enum PlannerConfig: String, CaseIterable, Identifiable {
         Read the whole image, name its vibe, then emit exactly this shape:
 
           CLEAR_TRACKS
-          ADD_TRACK  (as many as the scale rule allows — one per job, together
-                      describing that vibe completely)
+          ADD_TRACK  (style, mood and a lead, plus a second instrument only if the
+                      page has a second subject, together describing that vibe)
 
         Always this shape, every time — even when the drawing has barely changed. If
         the vibe really is the same, your prompts will come out nearly the same and the
@@ -104,13 +104,13 @@ enum PlannerConfig: String, CaseIterable, Identifiable {
         itself.
 
         Rebuilding from scratch is not licence to rebuild big. A single mark still gets
-        the two-track floor and nothing more. Where you do have a scene to fill, spend
-        the tracks in job order: the foundation that establishes the world first, then
-        the drawing's main character, then a rhythmic or textural detail last.
+        the three-layer floor and nothing more. Build the layers in order: the style
+        that establishes the world, the mood, the lead for the drawing's main
+        character, and a second instrument last.
 
         Rebuilding is also not licence to change bands. The idiom you are rebuilding in
-        is the idiom of the tracks you are clearing — read it off them before you clear
-        them, and put the new mix back inside it. A session that changes genre every
+        is the idiom of the style layer you are clearing. Read it off before you clear,
+        and put the new mix back inside it. A session that changes genre every
         time the drawing changes is the worst thing this strategy can do.
         """
 
@@ -149,11 +149,11 @@ enum PlannerConfig: String, CaseIterable, Identifiable {
           bad:  "ocean"                                          (no character)
 
         Mix continuous and intermittent. A scene made only of beds is lifeless; one made
-        only of hits is chaos. Read the job table below in sound-design terms: FOUNDATION
-        is the room's low rumble, BODY the sustained environmental layer, VOICE the one
-        sound the scene is *about*, MOTION the thing that intermittently happens. The
-        one-job-per-track rule holds exactly as written — two overlapping room tones blur
-        into each other the same way two pads do.
+        only of hits is chaos. Read the role table below in sound-design terms: STYLE
+        is the room's low rumble, MOOD how the place feels, VOICE the one sound the
+        scene is *about*, BODY the thing that intermittently happens. One role per layer
+        holds exactly as written: two overlapping room tones blur into each other the
+        same way two pads do.
 
         If something drawn has no natural sound — an abstract shape, a letter, a
         scribble — give it texture rather than melody: friction, resonance, moving air,
@@ -166,8 +166,8 @@ enum PlannerConfig: String, CaseIterable, Identifiable {
         FIRST DECIDE: does this event CONTINUE the current scene, or REPLACE it?
 
         CONTINUE — the new element belongs beside what is already playing. Add one
-        track or modify one. Leave the rest alone. Usually one or two actions. If the
-        job the new element wants is already taken, modifying is the only option.
+        layer or modify one. Leave the rest alone. Usually one or two actions. If the
+        role the new element wants is already taken, modifying is the only option.
 
         REPLACE — the event contradicts the mood the current tracks describe.
         Contradiction is opposite energy (calm vs violent), opposite register (bright

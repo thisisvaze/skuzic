@@ -6,9 +6,11 @@ Thanks for helping. Bug reports, ideas and pull requests are all welcome.
 
 - **Bugs.** Open an issue with steps to reproduce. Audio bugs are much easier to
   fix with a short screen recording or a screenshot of the mixer's History tab.
-- **The palette.** `src/vision/palette.json` is every mood and instrument the
-  drawing reader can pick. New entries change how skuzic sounds and need no
-  audio knowledge.
+- **The palette.** `src/vision/palette.json` is every vibe, mood and
+  instrument skuzic can play. New entries change how it sounds and need no
+  audio knowledge. A new vibe also wants a little picture in
+  `src/ui/VibePicker.tsx` (until then it borrows the blank page's) and a
+  preview loop: `scripts/make-vibe-previews.py <id>` renders one.
 - **The Reimagine prompt.** What Gemini does with your drawing lives in
   `SYSTEM_INSTRUCTION` in `src/llm/planner.ts`.
 - **New event sources.** Anything that can become an event string fits the
@@ -48,8 +50,14 @@ overlay (or Settings → Gemini API key). It is stored in localStorage.
 1. Open `ios/Skuzic.xcodeproj`
 2. In *Signing & Capabilities*, pick your own team and change the bundle
    identifier. Don't commit those changes.
-3. Run, then **Settings** (gear on the gallery, or Engine on a sketch) and
-   paste your Gemini key. It is stored in the Keychain.
+3. Run, then **Settings** (the gear, in the gallery or on a sketch) and paste
+   your Gemini key. It is stored in the Keychain.
+
+The Simulator has no Pencil, so there the mouse draws. Debug builds also take
+launch arguments for a scripted session: `-SkuzicDemo sea` (or `sun`) draws a
+scene after ten seconds, and `-SkuzicPreview bossa` taps a vibe. The drawing
+reader is `ios/Skuzic/Vision/SiglipEyes.mlpackage`, made by
+`scripts/make-siglip-coreml.py`.
 
 ### Magenta RT2 (optional, Apple Silicon)
 

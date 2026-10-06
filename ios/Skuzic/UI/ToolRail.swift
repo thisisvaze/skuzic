@@ -19,7 +19,7 @@ struct ToolRail: View {
             HStack(spacing: Self.sliderGap) {
                 RailSlider(value: $canvas.sizeFraction) {
                     Circle()
-                        .fill(.white)
+                        .fill(Theme.panel)
                         .frame(width: nibPreview, height: nibPreview)
                 }
 
@@ -27,7 +27,7 @@ struct ToolRail: View {
                     Circle()
                         .fill(canvas.color.opacity(canvas.opacity))
                         .frame(width: 18, height: 18)
-                        .overlay(Circle().stroke(.white.opacity(0.9), lineWidth: 1.5))
+                        .overlay(Circle().stroke(Theme.panel, lineWidth: 1.5))
                 }
             }
 
@@ -48,6 +48,11 @@ struct ToolRail: View {
                 RailButton(icon: "eraser", active: canvas.erasing, help: "Eraser") {
                     canvas.erasing.toggle()
                 }
+
+                RailButton(icon: canvas.penSound ? "waveform" : "waveform.slash", active: false,
+                           help: canvas.penSound ? "Pen sound: on" : "Pen sound: off") {
+                    canvas.penSound.toggle()
+                }
             }
 
             divider
@@ -59,8 +64,8 @@ struct ToolRail: View {
                 Circle()
                     .fill(canvas.color)
                     .frame(width: 36, height: 36)
-                    .overlay(Circle().stroke(.white.opacity(0.9), lineWidth: 2))
-                    .overlay(Circle().stroke(.black.opacity(0.25), lineWidth: 0.5))
+                    .overlay(Circle().stroke(Theme.panel, lineWidth: 2))
+                    .overlay(Circle().stroke(Theme.border, lineWidth: 1))
                     // Without this the hit area and pointer highlight default to
                     // the bounding rect, so a round swatch reads as a square.
                     .contentShape(Circle())
@@ -98,12 +103,7 @@ struct ToolRail: View {
         .fixedSize()
         .padding(.vertical, 11)
         .padding(.horizontal, 9)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .stroke(.white.opacity(0.12), lineWidth: 0.5)
-        )
-        .shadow(color: .black.opacity(0.22), radius: 16, y: 5)
+        .glass(RoundedRectangle(cornerRadius: 24, style: .continuous))
     }
 
     private var opacityBinding: Binding<CGFloat> {
@@ -115,7 +115,7 @@ struct ToolRail: View {
     }
 
     private var divider: some View {
-        Rectangle().fill(.white.opacity(0.14)).frame(width: Self.contentWidth, height: 0.5)
+        Rectangle().fill(Theme.border).frame(width: Self.contentWidth, height: 1)
     }
 
     /// The nib at true scale, capped so a 240pt watercolour doesn't dwarf the rail.
@@ -136,11 +136,11 @@ private struct RailButton: View {
             Image(systemName: icon)
                 .font(.system(size: 21, weight: .medium))
                 .frame(width: ToolRail.contentWidth, height: 38)
-                .foregroundStyle(active ? Color.black : Color.white.opacity(enabled ? 0.85 : 0.3))
+                .foregroundStyle(active ? Theme.panel : Theme.ink.opacity(enabled ? 0.85 : 0.3))
                 .background {
                     if active {
                         RoundedRectangle(cornerRadius: 9, style: .continuous)
-                            .fill(.white.opacity(0.92))
+                            .fill(Theme.ink)
                     }
                 }
                 .contentShape(Rectangle())
@@ -164,10 +164,10 @@ private struct RailSlider<Thumb: View>: View {
         GeometryReader { geo in
             let span = geo.size.height
             ZStack(alignment: .bottom) {
-                Capsule().fill(.black.opacity(0.28))
+                Capsule().fill(Theme.muted)
 
                 Capsule()
-                    .fill(.white.opacity(0.85))
+                    .fill(Theme.ink.opacity(0.85))
                     .frame(height: max(4, span * value))
 
                 thumb()

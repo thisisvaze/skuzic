@@ -16,6 +16,11 @@ enum Preferences {
         case inkColor = "skuzic_ink_color"
         case brushSize = "skuzic_brush_size"
         case inkOpacity = "skuzic_ink_opacity"
+        case penSound = "skuzic_paper_sound"
+        /// The vibe a session starts from, like the web build's skuzic_vibe.
+        case vibe = "skuzic_vibe"
+        /// "system", "light" or "dark".
+        case theme = "skuzic_theme"
         /// Seeds a brand new sketch, so the engine settings you last dialled in
         /// carry forward instead of resetting to the shipped defaults.
         ///

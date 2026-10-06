@@ -121,13 +121,17 @@ final class PcmScheduler: @unchecked Sendable {
         }
     }
 
-    func pause() {
+    /// Silence. The default is a quick duck, the way a pause button should feel;
+    /// a longer `fade` lets the music wind down, as when the page is wiped. The
+    /// queued audio (seconds of it) keeps playing under the ramp, so a long fade
+    /// can't run dry halfway through.
+    func pause(fade: Double = 0.08) {
         queue.async { [self] in
             guard !closed else { return }
             wanted = false
             timeline.clear(to: .paused)
             publish()
-            ramp(to: 0, seconds: 0.08) { [weak self] in
+            ramp(to: 0, seconds: fade) { [weak self] in
                 self?.clear(to: .paused, reason: "pause")
             }
         }
@@ -278,11 +282,16 @@ final class PcmScheduler: @unchecked Sendable {
         rampID &+= 1
         let id = rampID
         let start = engine?.mainMixerNode.outputVolume ?? 0
-        for step in 1...8 {
-            queue.asyncAfter(deadline: .now() + seconds * Double(step) / 8) { [weak self] in
+        // Enough steps that a long fade glides instead of stepping, eased so the
+        // level falls away like music winding down rather than giving up at the end.
+        let steps = max(8, Int(seconds * 40))
+        for step in 1...steps {
+            let x = Double(step) / Double(steps)
+            let eased = Float(1 - pow(1 - x, 1.5))
+            queue.asyncAfter(deadline: .now() + seconds * x) { [weak self] in
                 guard let self, !self.closed, self.rampID == id else { return }
-                self.engine?.mainMixerNode.outputVolume = start + (target - start) * Float(step) / 8
-                if step == 8 { done?() }
+                self.engine?.mainMixerNode.outputVolume = start + (target - start) * eased
+                if step == steps { done?() }
             }
         }
     }

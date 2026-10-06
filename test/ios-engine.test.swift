@@ -15,7 +15,7 @@ final class PcmScheduler: @unchecked Sendable {
          onFailure: @escaping @Sendable (Error) -> Void) { self.onState = onState }
     func start() throws {}
     func play() { snapshot.phase = .buffering; onState(snapshot) }
-    func pause() { snapshot.phase = .paused; onState(snapshot) }
+    func pause(fade: Double = 0.08) { snapshot.phase = .paused; onState(snapshot) }
     func flush(reason: String = "stop") { snapshot.phase = .stopped; onState(snapshot) }
     func reset(onSilent: @escaping @Sendable () -> Void) {
         snapshot.phase = .buffering
