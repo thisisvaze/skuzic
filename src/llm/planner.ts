@@ -1,4 +1,5 @@
 import { GoogleGenAI, MediaResolution, ThinkingLevel } from '@google/genai';
+import { geminiAuth } from '../lib/relay';
 import { CAPABILITIES } from '../audio/engine';
 import { PLAN_SCHEMA, normalize } from '../core/schema';
 import type { Action, SkuzicState } from '../core/types';
@@ -287,8 +288,9 @@ config: bpm=${c.bpm} density=${c.density.toFixed(2)} brightness=${c.brightness.t
 const PLAN_TIMEOUT_MS = 10_000;
 
 export function createPlanner(apiKey: string, model: PlannerModel = DEFAULT_PLANNER_MODEL) {
+  const auth = geminiAuth(apiKey);
   const ai = new GoogleGenAI({
-    apiKey,
+    apiKey: auth.apiKey,
     // The SDK retries 408/409/429/5XX five times by default, with exponential
     // backoff that honours retry-after-ms. For a batch job that is right; here
     // it is actively harmful. A rate limit gets swallowed and re-tried past
@@ -299,7 +301,7 @@ export function createPlanner(apiKey: string, model: PlannerModel = DEFAULT_PLAN
     // in under a second instead of over ten. Nothing is lost by not retrying:
     // this fires on every pause in drawing, so the next stroke *is* the retry,
     // and it will be planned against a newer canvas than this one anyway.
-    httpOptions: { retryOptions: { attempts: 1 } },
+    httpOptions: { ...auth.httpOptions, retryOptions: { attempts: 1 } },
   });
 
   return async function planActions(

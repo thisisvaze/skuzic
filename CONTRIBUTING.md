@@ -31,6 +31,8 @@ you spend time on it.
 - `src/llm/`: Gemini's prompts for Reimagine and for asking the band.
 - `src/audio/lyria.ts` and `magenta.ts`: the two music engines. `server/` is
   the bridge that runs Magenta RT on your Mac.
+- `api/gemini.mjs`: the hosted demo's key relay, so visitors can play without
+  a key of their own.
 - [`docs/how-it-works.md`](docs/how-it-works.md): the long version.
 
 ## Setup
@@ -42,9 +44,11 @@ pnpm install
 pnpm dev
 ```
 
-**Start drawing** asks for a Gemini key from https://aistudio.google.com/apikey
-and checks it with Google (`checkGeminiKey` in `src/audio/lyria.ts`) before
-saving it to localStorage. Settings → Gemini API key changes or removes it.
+With `GEMINI_API_KEY` in `.env`, the dev server mounts the same relay as the
+hosted demo and plays on it. Without it, **Start drawing** asks for a key from
+https://aistudio.google.com/apikey and checks it with Google (`checkGeminiKey`
+in `src/audio/lyria.ts`) before saving it to localStorage. Settings → Gemini
+API key changes or removes it.
 
 ### iOS
 

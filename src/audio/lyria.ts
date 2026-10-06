@@ -6,6 +6,7 @@ import {
   type LiveMusicSession,
 } from '@google/genai';
 import type { MixConfig } from '../core/types';
+import { geminiAuth } from '../lib/relay';
 import {
   CAPABILITIES,
   type EngineCapabilities,
@@ -72,13 +73,21 @@ export class LyriaEngine implements MusicEngine {
   private pending?: PromptWeight[];
   private status: EngineStatus = 'idle';
   private masterVolume = 0.8;
+  /** Set by close(), so a socket closing after it isn't mistaken for a drop. */
+  private closing = false;
+  private openedAt = 0;
+  private failSetup?: (error: Error) => void;
+  /** What the band was last told, to tell a reopened session the same. */
+  private lastConfig?: MixConfig;
+  private lastPrompts?: PromptWeight[];
 
+  /** An empty key plays through the hosted demo's relay (src/lib/relay.ts). */
   constructor(
     apiKey: string,
     private events: EngineEvents = {},
   ) {
     // Lyria RealTime is experimental and only exposed on the v1alpha surface.
-    this.ai = new GoogleGenAI({ apiKey, apiVersion: 'v1alpha' });
+    this.ai = new GoogleGenAI({ ...geminiAuth(apiKey), apiVersion: 'v1alpha' });
     this.mixer = new PromptMixer(
       (prompts) => void this.flush(prompts),
       this.capabilities.maxPrompts,
@@ -92,15 +101,22 @@ export class LyriaEngine implements MusicEngine {
 
   async connect(): Promise<void> {
     if (this.session) return;
+    this.closing = false;
     this.setStatus('connecting');
 
     this.scheduler = new PcmScheduler(this.masterVolume);
     await this.scheduler.resume();
+    await this.open();
+  }
 
+  /** Opens a session and waits for setupComplete; rejects if it closes first. */
+  private async open(): Promise<LiveMusicSession> {
     let markReady: () => void;
-    this.ready = new Promise<void>((resolve) => {
+    this.ready = new Promise<void>((resolve, reject) => {
       markReady = resolve;
+      this.failSetup = reject;
     });
+    this.openedAt = Date.now();
 
     this.session = await this.ai.live.music.connect({
       model: MUSIC_MODEL,
@@ -108,7 +124,9 @@ export class LyriaEngine implements MusicEngine {
         onmessage: (message: LiveMusicServerMessage) => {
           // The server requires setupComplete before it accepts client messages.
           if (message.setupComplete) {
-            this.setStatus('ready');
+            // A reopened session leaves a playing band's status alone.
+            if (this.status === 'connecting') this.setStatus('ready');
+            this.failSetup = undefined;
             markReady();
           }
 
@@ -127,14 +145,41 @@ export class LyriaEngine implements MusicEngine {
         onerror: (error: unknown) => {
           this.setStatus('error', error instanceof Error ? error.message : String(error));
         },
-        onclose: () => {
-          this.session = undefined;
-          this.setStatus('idle', 'stream closed');
-        },
+        onclose: (event: CloseEvent) => void this.closed(event.reason),
       },
     });
 
+    const session = this.session;
     await this.ready;
+    return session;
+  }
+
+  /**
+   * Google ends a Lyria session after about ten minutes, and the hosted demo's
+   * relay after five (Vercel Hobby's function limit). A session that ran a
+   * while and then closed is reopened with the same mix, so the band carries
+   * on after a dip of a second or two. One that dies young is a real failure,
+   * like a bad key or a used-up quota, and reconnecting would only loop.
+   * ponytail: a dip per reopen; open the next session before the cap and
+   * crossfade if it's ever noticeable.
+   */
+  private async closed(reason: string) {
+    this.session = undefined;
+    if (this.closing) return;
+    const why = reason || 'The music stream closed.';
+    if (this.failSetup || Date.now() - this.openedAt < 30_000) {
+      this.failSetup?.(new Error(why));
+      this.setStatus('error', why);
+      return;
+    }
+    try {
+      const session = await this.open();
+      if (this.lastConfig) await session.setMusicGenerationConfig({ musicGenerationConfig: toApiConfig(this.lastConfig) });
+      if (this.lastPrompts) await session.setWeightedPrompts({ weightedPrompts: this.lastPrompts });
+      if (this.status === 'playing') session.play();
+    } catch (error) {
+      this.setStatus('error', error instanceof Error ? error.message : String(error));
+    }
   }
 
   setPrompts(prompts: PromptWeight[]): void {
@@ -158,6 +203,7 @@ export class LyriaEngine implements MusicEngine {
       while (this.pending) {
         const next = this.pending;
         this.pending = undefined;
+        this.lastPrompts = next;
         await this.session.setWeightedPrompts({ weightedPrompts: next });
       }
     } catch (error) {
@@ -168,6 +214,7 @@ export class LyriaEngine implements MusicEngine {
   }
 
   async setConfig(config: MixConfig): Promise<void> {
+    this.lastConfig = config;
     if (!this.session) return;
     await this.ready;
     await this.session.setMusicGenerationConfig({
@@ -244,8 +291,11 @@ export class LyriaEngine implements MusicEngine {
   }
 
   async close(): Promise<void> {
+    this.closing = true;
     this.mixer.reset();
     this.session?.stop();
+    // Hang up too: on the demo, an open socket is relay time and bandwidth.
+    this.session?.close();
     this.session = undefined;
     await this.scheduler?.close();
     this.scheduler = undefined;

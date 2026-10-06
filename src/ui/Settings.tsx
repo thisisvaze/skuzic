@@ -21,7 +21,7 @@ const ENGINES: { id: Backend; name: string; blurb: string }[] = [
   {
     id: 'magenta',
     name: 'Magenta RT',
-    blurb: 'An open model that runs on your own Mac. Needs the local bridge running.',
+    blurb: 'Offline, on your own Mac. Only when you run skuzic locally with the Magenta bridge set up.',
   },
 ];
 
@@ -31,6 +31,8 @@ interface Props {
   backend: Backend;
   onBackendChange: (backend: Backend) => void;
   apiKey: string;
+  /** The hosted demo's shared key plays when the artist has none. */
+  demo: boolean;
   /** Opens the key dialog, to connect a first key or swap it. */
   onConnectKey: () => void;
   onRemoveKey: () => void;
@@ -148,6 +150,7 @@ export function Settings({
   backend,
   onBackendChange,
   apiKey,
+  demo,
   onConnectKey,
   onRemoveKey,
   plannerConfig,
@@ -233,6 +236,16 @@ export function Settings({
                 </Button>
                 <Button size="sm" variant="destructive" onClick={onRemoveKey}>
                   Remove
+                </Button>
+              </div>
+            ) : demo ? (
+              <div className="flex items-center gap-3 rounded-2xl bg-card py-2.5 pr-2 pl-4">
+                <span className="min-w-0 flex-1 text-[13px] leading-snug text-muted-foreground">
+                  <span className="text-[14px] text-foreground">Using skuzic's shared key.</span> Everyone
+                  shares it, so it can get busy. Your own free key fixes slow starts and gaps.
+                </span>
+                <Button size="sm" onClick={onConnectKey}>
+                  Use my own
                 </Button>
               </div>
             ) : (

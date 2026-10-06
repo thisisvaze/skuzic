@@ -203,9 +203,13 @@ Which strategy produced which is only revealed in the History tab after the
 choice, so the ear decides rather than the label.
 
 The Gemini key is entered in the UI and stored locally (localStorage / Keychain).
-A/B still works on one key: switching re-steers the single stream with a
-`resetContext`, landing as a ducked cut in about a second. Dual-stream instant
-switching would need a second key, which we don't collect.
+On the hosted demo, a visitor without one plays through `api/gemini.mjs`, which
+relays Lyria and Reimagine with a server-side key. A/B plays both arms at once:
+B is a second, muted Lyria session on the same key, so *listen* is a gain flip.
+Measured 2026-10-06, two sessions on one key each kept real time and needed
+0.41 s of lead-in at worst. If that second stream can't start, switching falls
+back to re-steering the single stream with a `resetContext`, a ducked cut in
+about a second.
 
 Every choice is saved to IndexedDB as a preference record: the drawing as the
 planner saw it, the event, the mix both plans started from, both full plans

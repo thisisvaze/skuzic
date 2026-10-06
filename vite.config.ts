@@ -1,7 +1,8 @@
 import { appendFileSync, mkdirSync } from 'node:fs';
+import type { Server } from 'node:http';
 import path from 'node:path';
 import { fileURLToPath, URL } from 'node:url';
-import { defineConfig, type Plugin } from 'vite';
+import { defineConfig, loadEnv, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 
@@ -43,10 +44,33 @@ function logSink(): Plugin {
   };
 }
 
-export default defineConfig({
-  plugins: [react(), tailwindcss(), logSink()],
+/**
+ * The hosted demo's key relay (api/gemini.mjs) inside `pnpm dev`, when .env
+ * has GEMINI_API_KEY (no VITE_ prefix, so it never reaches the bundle).
+ * Without it, dev asks for a key in the app like a fork without one would.
+ */
+function demoRelay(key: string | undefined): Plugin {
+  return {
+    name: 'skuzic-demo-relay',
+    async configureServer(server) {
+      if (!key) return;
+      process.env.GEMINI_API_KEY = key;
+      // Plain JS for Vercel, so it's loaded by URL rather than type-checked here.
+      const { default: relay }: { default: Server } = await import(new URL('./api/gemini.mjs', import.meta.url).href);
+      server.middlewares.use((req, res, next) =>
+        req.url?.startsWith('/api/gemini') ? relay.emit('request', req, res) : next(),
+      );
+      server.httpServer?.on('upgrade', (req, socket, head) => {
+        if (req.url?.startsWith('/api/gemini')) relay.emit('upgrade', req, socket, head);
+      });
+    },
+  };
+}
+
+export default defineConfig(({ mode }) => ({
+  plugins: [react(), tailwindcss(), logSink(), demoRelay(loadEnv(mode, process.cwd(), '').GEMINI_API_KEY)],
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },
   server: { port: 5173 },
-});
+}));

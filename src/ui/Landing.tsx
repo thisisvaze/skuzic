@@ -113,9 +113,12 @@ function DemoSheet() {
 export function Landing({
   onStart,
   returning,
+  demo,
 }: {
   /** Asks for a key first if there isn't one yet. */
   onStart: () => void;
+  /** The shared demo key plays, so nobody needs one of their own. */
+  demo: boolean;
   /** A session is already open behind this page. */
   returning: boolean;
 }) {
@@ -162,7 +165,9 @@ export function Landing({
               <ArrowRight />
             </Button>
             <p className="mt-4 text-sm text-muted-foreground/80">
-              Best with headphones. You'll connect a free Gemini key next. It stays in this browser.
+              {demo
+                ? 'Best with headphones. Free, no sign-up.'
+                : "Best with headphones. You'll connect a free Gemini key next. It stays in this browser."}
             </p>
           </div>
 

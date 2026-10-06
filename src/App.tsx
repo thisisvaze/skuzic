@@ -17,6 +17,7 @@ import { reduce, reduceAll } from './core/reducer';
 import { INITIAL_STATE, type Action, type Backend, type SkuzicState } from './core/types';
 import { addRecord, countRecords, exportDataset, type AbRecord } from './lib/dataset';
 import { KEYS, load, save } from './lib/persist';
+import { relayAvailable } from './lib/relay';
 import { logSession } from './lib/sessionlog';
 import {
   DEFAULT_PLANNER_CONFIG,
@@ -163,9 +164,9 @@ export default function App() {
   /** Which pending variant the engine is playing right now. */
   const [abAudition, setAbAudition] = useState(0);
   /**
-   * The second stream that makes A/B switching instant. Needs its own Gemini
-   * key (two Lyria sessions on one key contend), which we don't collect, so
-   * this stays 'off' and switching cuts the single stream.
+   * The second stream that makes A/B switching instant. 'warming' while it
+   * connects and buffers, 'ready' once switching is a pure gain flip,
+   * 'failed' when it couldn't start, and switching then cuts the main stream.
    */
   const [auditionMode, setAuditionMode] = useState<'off' | 'warming' | 'ready' | 'failed'>('off');
   const [datasetCount, setDatasetCount] = useState(0);
@@ -179,6 +180,13 @@ export default function App() {
   });
   const [apiKey, setApiKey] = useState(() => load(KEYS.apiKey, ''));
   const [keyDialogOpen, setKeyDialogOpen] = useState(false);
+  /** The hosted demo's relay holds a key, so playing doesn't need one. */
+  const [demo, setDemo] = useState(false);
+  const demoRef = useRef(demo);
+  demoRef.current = demo;
+  useEffect(() => {
+    void relayAvailable().then(setDemo);
+  }, []);
   const apiKeyRef = useRef(apiKey);
   apiKeyRef.current = apiKey;
 
@@ -458,18 +466,61 @@ export default function App() {
   );
 
   /**
-   * Dual-stream A/B needs a second Gemini key (two Lyria sessions on one key
-   * contend). We only collect one, so switching cuts the single stream.
+   * Start the second stream for variant B, muted, so both A/B arms generate at
+   * once and switching between them is instant. One key carries both: measured
+   * 2026-10-06, two sessions on one key each kept real time and needed 0.41 s
+   * of lead-in at worst. Lyria only: the local Magenta bridge runs one session.
    */
-  const spawnAudition = useCallback(async (_next: SkuzicState) => {
-    void _next;
-  }, []);
+  const spawnAudition = useCallback(
+    async (next: SkuzicState) => {
+      if (stateRef.current.backend !== 'lyria') return;
+
+      const box: { engine: MusicEngine | null } = { engine: null };
+      const engine: MusicEngine = new LyriaEngine(apiKeyRef.current, makeEvents(box));
+      box.engine = engine;
+      auditionEngineRef.current = engine;
+      abBufferRef.current = 0;
+      setAuditionMode('warming');
+
+      try {
+        // Muted before connect so the scheduler is born silent.
+        engine.setMasterVolume(0);
+        await engine.connect();
+        // The choice may already be over: a keep or dismiss nulls the ref.
+        if (auditionEngineRef.current !== engine) {
+          void engine.close();
+          return;
+        }
+        await engine.setConfig(next.config);
+        if (auditionEngineRef.current !== engine) {
+          void engine.close();
+          return;
+        }
+        const live = next.tracks.filter((t) => !t.muted && t.volume > 0);
+        engine.setPrompts(live.map((t) => ({ text: t.prompt, weight: t.volume })));
+        // Streams into its own buffer, silently; onBuffer flips mode to ready.
+        engine.play();
+      } catch (error) {
+        if (auditionEngineRef.current === engine) {
+          auditionEngineRef.current = null;
+          setAuditionMode('failed');
+          pushLog({
+            event: 'A/B second stream failed, so switching falls back to a cut',
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+        void engine.close();
+      }
+    },
+    [makeEvents, pushLog],
+  );
 
   // ---- transport -----------------------------------------------------------
 
   const start = async (backend: Backend = stateRef.current.backend) => {
+    // No key of their own: the demo relay plays instead (an empty key).
     const key = apiKeyRef.current;
-    if (!key) return;
+    if (!key && !demoRef.current) return;
 
     // engineRef outlives the engine. A stream that closes or errors reports it
     // through the status callbacks rather than by throwing, so `catch` never
@@ -672,7 +723,7 @@ export default function App() {
               const pair: PlannerConfigId[] =
                 Math.random() < 0.5 ? [mine, rival] : [rival, mine];
 
-              // One arm per key: two calls on one key is a 429 magnet.
+              // A second client on the same key, so the two plans run side by side.
               const plannerB = plannerBRef.current ?? planner;
               const settled = await Promise.allSettled(
                 pair.map((id, i) => (i === 0 ? planner : plannerB)(jobEvent, base, image, id)),
@@ -703,7 +754,7 @@ export default function App() {
                   setAbAudition(0);
                   // A starts playing immediately; the reset drops audio queued
                   // under the old mix so A is heard in ~a second, as a cut.
-                  // B spins up muted on its own key so switching is instant.
+                  // B spins up muted as a second stream so switching is instant.
                   steerEngine(variants[0].next);
                   engineRef.current?.resetContext();
                   // The pair exists because the user acted, so arm A must be
@@ -1173,7 +1224,7 @@ export default function App() {
 
   /** The landing's button is also the gesture that lets the browser start audio. */
   const enterStudio = () => {
-    if (!apiKeyRef.current) return setKeyDialogOpen(true);
+    if (!apiKeyRef.current && !demoRef.current) return setKeyDialogOpen(true);
     setView('studio');
     void start();
   };
@@ -1303,15 +1354,17 @@ export default function App() {
               getLevels={getLevels}
               interpretDisabled={!connected || !!pendingAb}
               showStart={!connected}
-              onStart={() => (apiKey ? void start() : setKeyDialogOpen(true))}
+              onStart={() => (apiKey || demo ? void start() : setKeyDialogOpen(true))}
               startDisabled={status === 'connecting'}
               startTitle={
-                !apiKey
+                !apiKey && !demo
                   ? 'Connect your Gemini key to start the band'
                   : status === 'connecting'
                     ? 'Starting the band…'
                     : status === 'error'
-                      ? statusDetail || 'Something went wrong. Try again.'
+                      ? `${statusDetail || 'Something went wrong. Try again.'}${
+                          apiKey ? '' : ' If the shared key is busy, use your own free key in Settings.'
+                        }`
                       : 'Start the band, then draw'
               }
               onAutoInterpret={() => void readDrawing()}
@@ -1387,6 +1440,7 @@ export default function App() {
         backend={state.backend}
         onBackendChange={(b) => void switchBackend(b)}
         apiKey={apiKey}
+        demo={demo}
         onConnectKey={() => setKeyDialogOpen(true)}
         onRemoveKey={() => {
           commitKey('');
@@ -1418,11 +1472,17 @@ export default function App() {
         }}
       />
 
-      <KeyDialog open={keyDialogOpen} onClose={() => setKeyDialogOpen(false)} onConnect={connectKey} />
+      <KeyDialog
+        open={keyDialogOpen}
+        demo={demo}
+        onClose={() => setKeyDialogOpen(false)}
+        onConnect={connectKey}
+      />
 
       {view === 'landing' && (
         <Landing
           onStart={enterStudio}
+          demo={demo}
           returning={connected}
         />
       )}

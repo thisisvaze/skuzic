@@ -26,10 +26,13 @@ function Step({ n, children }: { n: number; children: ReactNode }) {
  */
 export function KeyDialog({
   open,
+  demo,
   onClose,
   onConnect,
 }: {
   open: boolean;
+  /** The shared demo key is playing; this key would replace it. */
+  demo: boolean;
   onClose: () => void;
   /** Only ever called with a key Google accepted. */
   onConnect: (key: string) => void;
@@ -79,11 +82,12 @@ export function KeyDialog({
               autoFocus
               className="font-display text-xl font-semibold tracking-[-0.02em] outline-none"
             >
-              Connect your Gemini key
+              {demo ? 'Use your own Gemini key' : 'Connect your Gemini key'}
             </h2>
             <p className="mt-1.5 text-[14px] leading-relaxed text-muted-foreground">
-              skuzic has no servers and no accounts. Google's Lyria model plays the music live, on a
-              free key from your own Google account.
+              {demo
+                ? "Google's Lyria model plays the music. Everyone here shares skuzic's key, so it can get busy. A free key from your own Google account gives you your own quota."
+                : "skuzic has no accounts. Google's Lyria model plays the music live, on a free key from your own Google account."}
             </p>
           </div>
           <button
