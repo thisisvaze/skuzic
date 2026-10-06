@@ -212,6 +212,9 @@
   --input: oklch(0.93 0.005 270);
   --secondary: oklch(0.91 0.006 270);
   --ring: oklch(0.6 0.2 300);
+  --popover: oklch(1 0 0);
+  --card: oklch(0.975 0.003 270);
+  --border: oklch(0.21 0.01 270 / 9%);
   color: var(--foreground);
 }
 

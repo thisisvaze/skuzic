@@ -15,7 +15,8 @@ import vectors from './palette-vectors.json';
  * fully generic prompts drifted genre from drawing to drawing (and once
  * collapsed on Magenta). Short layers scored best and most reliably. The
  * engines want different balances: Lyria a "dreamy" ground with a light mood,
- * Magenta a plain ground with a strong mood (palette.json holds both).
+ * Magenta a plain ground with a strong mood (palette.json holds both). The
+ * ground itself comes from the vibe the artist starts from.
  *
  * It runs in the browser in milliseconds, costs nothing, sends the drawing
  * nowhere, and can only play phrases a person chose. Only the image half of
@@ -25,6 +26,12 @@ import vectors from './palette-vectors.json';
 
 export type Mood = (typeof palette.moods)[number];
 export type Instrument = (typeof palette.instruments)[number];
+/**
+ * Where a session starts: the genre the band plays in, the instruments it
+ * opens with, and the only instruments a drawing may bring in, so a string
+ * quartet never grows a kalimba.
+ */
+export type Vibe = (typeof palette.vibes)[number];
 
 export interface Ranked<T> {
   item: T;
@@ -47,14 +54,25 @@ const MODEL = 'onnx-community/siglip2-base-patch16-224-ONNX';
 
 const instrument = (id: string) => palette.instruments.find((i) => i.id === id)!;
 
+export const VIBES: Vibe[] = palette.vibes;
+/** "Just draw": silence until the first mark, then the drawing picks the sound. */
+export const DEFAULT_VIBE = VIBES[0];
+export const vibeById = (id: string) => VIBES.find((v) => v.id === id) ?? DEFAULT_VIBE;
+
 /**
- * What an empty page plays, and what first marks play until SigLIP is sure
- * what they are. The intro mood has no tags and never competes in a reading:
- * simple line art looks enough like "a few faint lines" that it used to win
- * over a plainly drawn house.
+ * The intro mood has no tags and never competes in a reading: simple line art
+ * looks enough like "a few faint lines" that it used to win over a plainly
+ * drawn house.
  */
-export const INTRO: Mix = { mood: palette.moods[0], instruments: [instrument('rhodes')] };
+const INTRO_MOOD = palette.moods[0];
 const MOODS = palette.moods.filter((m) => m.tags.length);
+
+/** What an empty page plays, and what first marks play until SigLIP is sure what they are. */
+export const introMix = (vibe: Vibe): Mix => ({
+  mood: INTRO_MOOD,
+  instruments: vibe.start.map(instrument),
+});
+export const isIntro = (mix: Mix) => mix.mood === INTRO_MOOD;
 
 /**
  * How sure SigLIP must be, and by how much it must prefer a new mood over the
@@ -89,10 +107,14 @@ function rank<T extends { id: string }>(items: T[], table: Vectors, image: Array
   return items.map((item, i) => ({ item, p: weights[i] / sum })).sort((a, b) => b.p - a.p);
 }
 
-export function readPage(image: ArrayLike<number>): Reading {
+export function readPage(image: ArrayLike<number>, vibe: Vibe = DEFAULT_VIBE): Reading {
   return {
     moods: rank(MOODS, vectors.moods, image),
-    instruments: rank(palette.instruments, vectors.instruments, image),
+    instruments: rank(
+      palette.instruments.filter((i) => vibe.instruments.includes(i.id)),
+      vectors.instruments,
+      image,
+    ),
   };
 }
 
@@ -109,9 +131,11 @@ export function chooseMood(ranked: Ranked<Mood>[], playing: string | null): Mood
  * carries the music through the change.
  */
 export function chooseInstruments(ranked: Ranked<Instrument>[], playing: string[]): Instrument[] {
-  if (!playing.length) return ranked.slice(0, 2).map((r) => r.item);
   const belief = (id: string) => ranked.find((r) => r.item.id === id)?.p ?? 0;
-  const seats = [...playing].sort((a, b) => belief(b) - belief(a));
+  // Only instruments still on offer keep their seats: a new vibe can take some away.
+  const seats = playing.filter((id) => ranked.some((r) => r.item.id === id));
+  if (!seats.length) return ranked.slice(0, 2).map((r) => r.item);
+  seats.sort((a, b) => belief(b) - belief(a));
   const challenger = ranked.find((r) => !seats.includes(r.item.id));
   const weakest = seats[seats.length - 1];
   if (
@@ -129,13 +153,15 @@ export function chooseInstruments(ranked: Ranked<Instrument>[], playing: string[
  * first reading still starts the intro; after that, an unsure page holds, and
  * the intro waits for a confident mood before it changes anything.
  */
-export function nextMix(reading: Reading, playing: Mix | null): Mix | null {
+export function nextMix(reading: Reading, playing: Mix | null, vibe: Vibe = DEFAULT_VIBE): Mix | null {
   const mood = chooseMood(reading.moods, playing?.mood.id ?? null);
-  if (!playing) return mood ? { mood, instruments: chooseInstruments(reading.instruments, []) } : INTRO;
-  if (playing === INTRO && !mood) return null;
+  if (!playing) {
+    return mood ? { mood, instruments: chooseInstruments(reading.instruments, []) } : introMix(vibe);
+  }
+  if (isIntro(playing) && !mood) return null;
   const instruments = chooseInstruments(
     reading.instruments,
-    playing === INTRO ? [] : playing.instruments.map((i) => i.id),
+    isIntro(playing) ? [] : playing.instruments.map((i) => i.id),
   );
   const next = { mood: mood ?? playing.mood, instruments };
   const same =
@@ -159,12 +185,13 @@ export const eyesOwn = (tracks: { origin: string }[], mix: Mix) =>
 export function mixActions(
   mix: Mix,
   backend: Backend,
-  config: Pick<MixConfig, 'density' | 'brightness'>,
+  config: Partial<MixConfig>,
+  vibe: Vibe = DEFAULT_VIBE,
 ): Action[] {
   const origin = originOf(mix);
   return [
     { type: 'CLEAR_TRACKS' },
-    { type: 'ADD_TRACK', label: 'Style', prompt: palette.ground[backend], volume: 1, origin },
+    { type: 'ADD_TRACK', label: 'Style', prompt: vibe.ground[backend], volume: 1, origin },
     { type: 'ADD_TRACK', label: 'Mood', prompt: mix.mood.prompt, volume: palette.moodWeight[backend], origin },
     ...mix.instruments.map(
       (inst, i): Action => ({

@@ -38,7 +38,12 @@ export interface MusicEngine {
   setPrompts(prompts: PromptWeight[]): void;
   setConfig(config: MixConfig): Promise<void>;
   play(): void;
-  pause(): void;
+  /**
+   * Silence. Without a fade it's a quick duck that feels immediate; with one,
+   * the music winds down over that many seconds while the stream keeps
+   * feeding it, so the queue can't run dry halfway through.
+   */
+  pause(fadeSeconds?: number): void;
   stop(): void;
   resetContext(): void;
   setMasterVolume(volume: number): void;

@@ -53,8 +53,11 @@ const FULL_SPEED = 1400;
  * balanced against it by ear.
  */
 const LEVEL = 0.6;
-/** Paper sits far under the notes: it should be felt, not followed. */
-const PAPER = 0.13;
+/**
+ * Paper sits far under the notes: it should be felt, not followed. At 0.13 it
+ * was a rasp people noticed over a session; this is about 8 dB under that.
+ */
+const PAPER = 0.05;
 const REVERB = 0.32;
 
 /** A pen that stops moving goes quiet this long after, like a real one. */
@@ -75,9 +78,10 @@ const PHRASE_MS = 2000;
 const HOME = [5, 9, 0];
 
 const PAPER_TONE: Record<PenTool, { rate: number; lowpass: number; buffer: 'rough' | 'smooth' }> = {
-  pencil: { rate: 1, lowpass: 7500, buffer: 'rough' },
-  marker: { rate: 0.85, lowpass: 3200, buffer: 'smooth' },
-  eraser: { rate: 0.55, lowpass: 1600, buffer: 'smooth' },
+  // Kept dark: the top octave of paper noise is hiss, and hiss is what tires.
+  pencil: { rate: 1, lowpass: 4200, buffer: 'rough' },
+  marker: { rate: 0.85, lowpass: 2400, buffer: 'smooth' },
+  eraser: { rate: 0.55, lowpass: 1300, buffer: 'smooth' },
 };
 
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v));

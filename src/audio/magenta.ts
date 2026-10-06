@@ -135,7 +135,11 @@ export class MagentaEngine implements MusicEngine {
     });
   }
 
+  private pauseTimer: ReturnType<typeof setTimeout> | null = null;
+
   play(): void {
+    if (this.pauseTimer) clearTimeout(this.pauseTimer);
+    this.pauseTimer = null;
     // Same as the Lyria path: connect() runs on page load, where the browser
     // refuses to start a context, so the gesture that reaches play() is the
     // first moment audio can actually be unblocked.
@@ -145,12 +149,21 @@ export class MagentaEngine implements MusicEngine {
     this.setStatus('playing');
   }
 
-  pause(): void {
+  pause(fadeSeconds?: number): void {
     // Duck first — the bridge keeps streaming briefly and the queue already
     // holds seconds of audio, so silence has to come from this end.
-    this.scheduler?.mute();
-    this.send({ type: 'pause' });
+    this.scheduler?.mute(fadeSeconds);
     this.setStatus('paused');
+    if (this.pauseTimer) clearTimeout(this.pauseTimer);
+    this.pauseTimer = null;
+    if (!fadeSeconds) {
+      this.send({ type: 'pause' });
+      return;
+    }
+    this.pauseTimer = setTimeout(() => {
+      this.pauseTimer = null;
+      this.send({ type: 'pause' });
+    }, fadeSeconds * 1000);
   }
 
   stop(): void {

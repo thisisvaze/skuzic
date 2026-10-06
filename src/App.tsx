@@ -12,6 +12,7 @@ import {
 } from './audio/engine';
 import { LyriaEngine } from './audio/lyria';
 import { DEFAULT_BRIDGE_URL, MagentaEngine } from './audio/magenta';
+import { VibePreview } from './audio/preview';
 import { reduce, reduceAll } from './core/reducer';
 import { INITIAL_STATE, type Action, type Backend, type SkuzicState } from './core/types';
 import { addRecord, countRecords, exportDataset, type AbRecord } from './lib/dataset';
@@ -31,13 +32,18 @@ import {
   type PlannerModel,
 } from './llm/planner';
 import {
-  INTRO,
+  DEFAULT_VIBE,
+  VIBES,
   eyesOwn,
+  introMix,
+  isIntro,
   loadEyes,
   mixActions,
   nextMix,
   readPage,
+  vibeById,
   type Mix,
+  type Vibe,
 } from './vision/eyes';
 import { inkConfig, inkOf, type Ink } from './vision/ink';
 import { AbChoice } from './ui/AbChoice';
@@ -48,6 +54,7 @@ import { Equalizer } from './ui/Equalizer';
 import { Landing, Wordmark } from './ui/Landing';
 import { Mixer } from './ui/Mixer';
 import { Settings, type Theme } from './ui/Settings';
+import { VibeStart } from './ui/VibePicker';
 
 const BRIDGE_URL =
   (import.meta.env.VITE_MAGENTA_BRIDGE_URL as string | undefined) || DEFAULT_BRIDGE_URL;
@@ -59,6 +66,9 @@ function loadBackend(fallback: Backend): Backend {
 }
 
 type Planner = ReturnType<typeof createPlanner>;
+
+/** How long the band takes to wind down when the page is wiped. */
+const CLEAR_FADE = 3;
 
 /** Wide enough for the mixer to sit beside the paper instead of over it (Tailwind's lg). */
 const wide = () => window.matchMedia('(min-width: 1024px)').matches;
@@ -121,6 +131,14 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   /** What the top bar says the band is hearing: a scene, or Gemini's take. */
   const [scene, setScene] = useState<string | null>(null);
+  /** The style the session plays in and the instruments a drawing may bring in. */
+  const [vibe, setVibe] = useState<Vibe>(() => vibeById(load(KEYS.vibe, DEFAULT_VIBE.id)));
+  // Read inside readDrawing, a stable callback; set by hand on pick so a read
+  // that starts in the same tick already plays in the new vibe.
+  const vibeRef = useRef(vibe);
+  /** The vibe whose preview loop is playing, if any. */
+  const [previewing, setPreviewing] = useState<string | null>(null);
+  const previewRef = useRef<VibePreview | null>(null);
   // index.html sets the class before first paint; this keeps it in sync with
   // the setting, and with the system while the setting says to follow it.
   const [theme, setTheme] = useState<Theme>(() => load<Theme>(KEYS.theme, 'system'));
@@ -245,6 +263,14 @@ export default function App() {
   // ---- state -> engine sync ------------------------------------------------
 
   const hasPlayed = useRef(false);
+  /** Set when the artist picks a vibe: start playing even though the page is still blank. */
+  const startNow = useRef(false);
+  /**
+   * The engine can take play() only once connected; before that a session
+   * doesn't exist yet and the call is lost. start() plays whatever was picked
+   * or drawn while it connected.
+   */
+  const engineReady = useRef(false);
   /** Set when the empty-mix branch below paused playback, so only that pause auto-resumes. */
   const autoPaused = useRef(false);
   /** Read inside the tracks effect, which must not re-run (and re-steer) on status changes. */
@@ -279,8 +305,13 @@ export default function App() {
       return;
     }
 
-    // Never start audio on a blank pad — wait until there is ink and a mix.
-    if (!hasPlayed.current && !canvasRef.current?.isEmpty()) {
+    // Never start audio on a blank pad (wait for ink and a mix), unless the
+    // artist just picked a vibe to start from.
+    if (
+      engineReady.current &&
+      (startNow.current || (!hasPlayed.current && !canvasRef.current?.isEmpty()))
+    ) {
+      startNow.current = false;
       hasPlayed.current = true;
       engine.play();
     }
@@ -315,6 +346,7 @@ export default function App() {
     const audition = auditionEngineRef.current;
     if (audition && abAuditionRef.current === 1) audition.setMasterVolume(masterVolume);
     else engineRef.current?.setMasterVolume(masterVolume);
+    previewRef.current?.setVolume(masterVolume);
     save(KEYS.masterVolume, masterVolume);
   }, [masterVolume]);
 
@@ -338,6 +370,7 @@ export default function App() {
     () => () => {
       void engineRef.current?.close();
       void auditionEngineRef.current?.close();
+      previewRef.current?.close();
     },
     [],
   );
@@ -471,13 +504,16 @@ export default function App() {
         return;
       }
       engine.setMasterVolume(masterVolume);
+      engineReady.current = true;
 
       await engine.setConfig(stateRef.current.config);
 
       // Both backends reject an empty prompt list, so playback waits until the
-      // mix has something *and* the pad isn't blank — see the tracks effect.
+      // mix has something *and* the pad isn't blank (or a vibe was picked while
+      // connecting); see the tracks effect.
       const live = stateRef.current.tracks.filter((t) => !t.muted && t.volume > 0);
-      if (live.length && !canvasRef.current?.isEmpty()) {
+      if (live.length && (startNow.current || !canvasRef.current?.isEmpty())) {
+        startNow.current = false;
         engine.setPrompts(live.map((t) => ({ text: t.prompt, weight: t.volume })));
         hasPlayed.current = true;
         engine.play();
@@ -519,7 +555,10 @@ export default function App() {
     setStatus('idle');
     setBuffered(0);
     // The next session reads the page fresh rather than assuming the old scene.
+    previewRef.current?.stop(0.3);
     mixRef.current = null;
+    startNow.current = false;
+    engineReady.current = false;
     setScene(null);
   };
 
@@ -540,7 +579,7 @@ export default function App() {
     const mix = mixRef.current;
     if (mix && eyesOwn(stateRef.current.tracks, mix)) {
       const { density, brightness } = stateRef.current.config;
-      mixActions(mix, next, { density, brightness }).forEach((action) => dispatch(action));
+      mixActions(mix, next, { density, brightness }, vibeRef.current).forEach((action) => dispatch(action));
     }
     save(KEYS.backend, next);
     if (!engineRef.current) return;
@@ -780,25 +819,31 @@ export default function App() {
         if (!engineRef.current || pendingAbRef.current || !canvas) return;
 
         const startedAt = performance.now();
+        const vibe = vibeRef.current;
         const playing = mixRef.current;
-        let next: Mix | null = playing === INTRO ? null : INTRO;
+        let next: Mix | null = playing && isIntro(playing) ? null : introMix(vibe);
         let ink: Ink = { coverage: 0, warmth: 0 };
         let reasoning = 'the page is empty';
         if (!canvas.isEmpty()) {
           const url = canvas.toDataURL();
           const [vector, page] = await Promise.all([(await loadEyes()).read(url), inkOf(url)]);
-          const reading = readPage(vector);
+          const reading = readPage(vector, vibe);
           ink = page;
           reasoning = [...reading.moods.slice(0, 2), ...reading.instruments.slice(0, 2)]
             .map((r) => `${r.item.label} ${Math.round(r.p * 100)}%`)
             .join(' · ');
-          next = nextMix(reading, playing);
+          next = nextMix(reading, playing, vibe);
         }
         const mix = next ?? playing;
         if (!mix) continue;
         // How much ink and how warm it is move the two live knobs on every
         // reading, so the music grows as the page fills even within one mix.
-        const config = inkConfig(mix.mood, ink);
+        // Starting from silence is also when the vibe's tempo and drums go in:
+        // a tempo change restarts the band, which would cut into music playing.
+        const config = {
+          ...inkConfig(mix.mood, ink),
+          ...(playing ? {} : { bpm: vibe.bpm, muteDrums: !vibe.drums }),
+        };
 
         if (!next) {
           // Gemini's own knob settings stand until the drawing reads as something new.
@@ -814,12 +859,13 @@ export default function App() {
         }
 
         mixRef.current = next;
-        setScene(next.mood.label);
+        // A vibe's opening is named for the vibe; "Just draw" opens on a fresh page.
+        setScene(isIntro(next) && vibe !== DEFAULT_VIBE ? vibe.name : next.mood.label);
         // The pen answers a new mood now; the band takes a few seconds to follow.
-        if (next !== INTRO && next.mood !== playing?.mood) {
+        if (!isIntro(next) && next.mood !== playing?.mood) {
           canvasRef.current?.cue(next.mood.brightness >= 0.5);
         }
-        const actions = mixActions(next, stateRef.current.backend, config);
+        const actions = mixActions(next, stateRef.current.backend, config, vibe);
         actions.forEach((action) => dispatch(action));
         pushLog({
           event: `Feels like ${next.mood.label}: ${next.instruments.map((i) => i.label).join(' and ')}`,
@@ -836,6 +882,60 @@ export default function App() {
       reading.current = false;
     }
   }, [pushLog]);
+
+  /** Wiping the page lets the band wind down to silence; the next mark brings it back. */
+  const fadeOut = () => {
+    previewRef.current?.stop();
+    mixRef.current = null;
+    setScene(null);
+    hasPlayed.current = false;
+    startNow.current = false;
+    autoPaused.current = false;
+    if (statusRef.current !== 'playing') return;
+    engineRef.current?.pause(CLEAR_FADE);
+    auditionEngineRef.current?.pause(CLEAR_FADE);
+  };
+
+  /**
+   * Pick where to start. On a blank page that's a preview loop of the vibe and
+   * its channels laid out in the mixer; the band itself starts on the first
+   * mark, in the vibe's tempo. With a drawing already there it switches now.
+   */
+  const pickVibe = (next: Vibe) => {
+    vibeRef.current = next;
+    setVibe(next);
+    save(KEYS.vibe, next.id);
+    const opening = introMix(next);
+    const calm = inkConfig(opening.mood, { coverage: 0, warmth: 0 });
+    if (canvasRef.current?.isEmpty() ?? true) {
+      fadeOut();
+      if (next === DEFAULT_VIBE) return;
+      if (!previewRef.current) {
+        previewRef.current = new VibePreview(setPreviewing);
+        previewRef.current.setVolume(masterVolumeRef.current);
+      }
+      void previewRef.current.play(next.id);
+      setScene(next.name);
+      mixActions(opening, stateRef.current.backend, calm, next).forEach((action) => dispatch(action));
+      return;
+    }
+    dispatch({ type: 'SET_CONFIG', config: { bpm: next.bpm, muteDrums: !next.drums } });
+    if (autoInterpret) {
+      // The music follows the drawing: hear that drawing in the new style.
+      mixRef.current = null;
+      void readDrawing();
+      return;
+    }
+    mixRef.current = opening;
+    setScene(next.name);
+    startNow.current = true;
+    mixActions(opening, stateRef.current.backend, calm, next).forEach((action) => dispatch(action));
+  };
+
+  // The band has taken over from a preview: let the preview bow out.
+  useEffect(() => {
+    if (audible && previewRef.current?.playing) previewRef.current.stop(2);
+  }, [audible]);
 
   /** Fetches SigLIP while the band connects, so the first stroke is read at once. */
   const warmEyes = useCallback(() => {
@@ -1039,7 +1139,9 @@ export default function App() {
       ? 'Starting the band…'
       : status === 'error'
         ? 'The band dropped out'
-        : !connected
+        : previewing && !playing
+          ? `${vibeById(previewing).name}, a preview`
+          : !connected
           ? 'Not playing'
           : thinking
             ? 'Reimagining…'
@@ -1048,6 +1150,11 @@ export default function App() {
               : (scene ?? 'Draw anything');
 
   const togglePlay = () => {
+    // During a preview the button is the preview's: it stops it.
+    if (previewing && !playing) {
+      previewRef.current?.stop(1);
+      return;
+    }
     // Either way the user now owns playback state; an earlier
     // empty-mix auto-pause must not resume over their head.
     autoPaused.current = false;
@@ -1094,18 +1201,18 @@ export default function App() {
               {connected ? (
                 <button
                   type="button"
-                  aria-label={playing ? 'Pause' : 'Play'}
-                  title={playing ? 'Pause' : 'Play'}
+                  aria-label={playing || previewing ? 'Pause' : 'Play'}
+                  title={playing || previewing ? 'Pause' : 'Play'}
                   onClick={togglePlay}
                   className={cn(
                     'grid size-8 shrink-0 place-items-center rounded-full outline-none transition-colors',
                     'focus-visible:ring-2 focus-visible:ring-ring/60 [&_svg]:size-4 [&_svg]:fill-current',
-                    playing
+                    playing || previewing
                       ? 'bg-brand text-white'
                       : 'bg-primary text-primary-foreground hover:bg-primary/85',
                   )}
                 >
-                  {playing ? <Pause /> : <Play className="translate-x-px" />}
+                  {playing || previewing ? <Pause /> : <Play className="translate-x-px" />}
                 </button>
               ) : (
                 <span className="grid size-8 shrink-0 place-items-center">
@@ -1206,7 +1313,17 @@ export default function App() {
                 )
               }
               onAutoInterpret={() => void readDrawing()}
-              onClearInterpret={() => void readDrawing()}
+              onClear={fadeOut}
+              emptyState={
+                connected && (
+                  <VibeStart
+                    vibes={VIBES}
+                    current={vibe.id}
+                    onPick={pickVibe}
+                    hint={previewing ? `Previewing ${vibeById(previewing).name}. Draw to start the band.` : undefined}
+                  />
+                )
+              }
             />
           </main>
 
@@ -1226,6 +1343,9 @@ export default function App() {
             dispatch={dispatch}
             config={state.config}
             capabilities={caps}
+            vibe={vibe}
+            vibes={VIBES}
+            onPickVibe={pickVibe}
             follow={autoInterpret}
             onFollowChange={(on) => {
               setAutoInterpret(on);

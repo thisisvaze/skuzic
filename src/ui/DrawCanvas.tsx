@@ -221,8 +221,10 @@ interface Props {
    * burst of strokes into one read.
    */
   onAutoInterpret?: () => void;
-  /** Fired after clearing the pad when auto-interpret is on. */
-  onClearInterpret?: () => void;
+  /** Fired when the page is wiped from the toolbar, whether or not the music follows the drawing. */
+  onClear?: () => void;
+  /** Shown along the bottom of the blank page, under the hint. Only its own controls take clicks. */
+  emptyState?: ReactNode;
   interpretDisabled?: boolean;
   /** The sheet only glows while audio is actually running. */
   playing?: boolean;
@@ -244,7 +246,8 @@ interface Props {
 export const DrawCanvas = forwardRef<CanvasHandle, Props>(function DrawCanvas(
   {
     onAutoInterpret,
-    onClearInterpret,
+    onClear,
+    emptyState,
     interpretDisabled,
     playing,
     getLevels,
@@ -467,9 +470,7 @@ export const DrawCanvas = forwardRef<CanvasHandle, Props>(function DrawCanvas(
     const hadInk = dirty.current;
     if (hadInk) touch.current?.clear();
     clearPad();
-    if (hadInk && canAutoInterpret()) {
-      (onClearInterpret ?? onAutoInterpret)?.();
-    }
+    if (hadInk) onClear?.();
   };
 
   /**
@@ -737,6 +738,12 @@ export const DrawCanvas = forwardRef<CanvasHandle, Props>(function DrawCanvas(
             onPointerUp={showStart ? undefined : up}
             onPointerLeave={showStart ? undefined : up}
           />
+          {/* Kept off the middle of the page, which is where people start drawing. */}
+          {!hasInk && !showStart && emptyState && (
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center p-3 sm:p-4">
+              {emptyState}
+            </div>
+          )}
           {!hasInk && !showStart && (
             <div className="pointer-events-none absolute inset-0 grid place-items-center px-6 text-center">
               <div>

@@ -21,6 +21,7 @@ export const KEYS = {
   paperSound: 'skuzic_paper_sound',
   theme: 'skuzic_theme',
   mixerOpen: 'skuzic_mixer_open',
+  vibe: 'skuzic_vibe',
   // Versioned because `load` merges a stored record *over* the defaults, so a
   // saved config from an earlier build silently wins forever. The key, tempo
   // and guidance in INITIAL_CONFIG are the sound of the instrument, not a user

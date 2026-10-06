@@ -1,5 +1,5 @@
 import { NOTES, attend, frictionLevel, mayPlay, nextNote, phrase } from '../src/audio/touch';
-import { INTRO, chooseInstruments, chooseMood, mixActions, nextMix, readPage } from '../src/vision/eyes';
+import { DEFAULT_VIBE, chooseInstruments, chooseMood, isIntro, mixActions, nextMix, readPage, vibeById } from '../src/vision/eyes';
 import { inkConfig } from '../src/vision/ink';
 import vectors from '../src/vision/palette-vectors.json';
 import palette from '../src/vision/palette.json';
@@ -218,7 +218,7 @@ check(
   JSON.stringify(chooseInstruments([{ item: i3, p: 0.35 }, { item: i1, p: 0.33 }, { item: i2, p: 0.32 }], [i1.id, i2.id]).map((i) => i.id)) ===
     JSON.stringify([i1.id, i2.id]),
 );
-check('an unsure first reading starts the intro', nextMix({ moods: [{ item: m1, p: 0.3 }], instruments: rainy.instruments }, null) === INTRO);
+check('an unsure first reading starts the intro', isIntro(nextMix({ moods: [{ item: m1, p: 0.3 }], instruments: rainy.instruments }, null)!));
 check('the same reading twice changes nothing', nextMix(rainy, nextMix(rainy, null)) === null);
 
 const mixed = (backend: 'lyria' | 'magenta') => mixActions(nextMix(rainy, null)!, backend, { density: 0.4, brightness: 0.4 });
@@ -229,10 +229,34 @@ check(
 );
 check(
   'each engine gets its measured balance',
-  layers('lyria')[0].type === 'ADD_TRACK' && layers('lyria')[0].prompt === palette.ground.lyria &&
-    layers('magenta')[0].type === 'ADD_TRACK' && layers('magenta')[0].prompt === palette.ground.magenta &&
+  layers('lyria')[0].type === 'ADD_TRACK' && layers('lyria')[0].prompt === DEFAULT_VIBE.ground.lyria &&
+    layers('magenta')[0].type === 'ADD_TRACK' && layers('magenta')[0].prompt === DEFAULT_VIBE.ground.magenta &&
     layers('lyria')[1].type === 'ADD_TRACK' && layers('lyria')[1].volume === palette.moodWeight.lyria &&
     layers('magenta')[1].type === 'ADD_TRACK' && layers('magenta')[1].volume === palette.moodWeight.magenta,
+);
+
+const jazz = vibeById('jazz');
+const piano = vibeById('piano');
+check(
+  'a vibe plays in its own style',
+  mixActions(nextMix(rainy, null)!, 'lyria', {}, jazz).some((a) => a.type === 'ADD_TRACK' && a.label === 'Style' && a.prompt === jazz.ground.lyria),
+);
+check(
+  "only the vibe's own instruments compete for a seat",
+  readPage(vectors.moods.rainy.vector, jazz).instruments.every((r) => jazz.instruments.includes(r.item.id)),
+);
+check(
+  'a vibe without instruments plays its style and the mood alone',
+  nextMix(readPage(vectors.moods.rainy.vector, piano), null, piano)!.instruments.length === 0,
+);
+check(
+  'every vibe names real instruments and a style for each engine',
+  palette.vibes.every(
+    (v) =>
+      v.ground.lyria && v.ground.magenta &&
+      [...v.start, ...v.instruments].every((id) => palette.instruments.some((i) => i.id === id)) &&
+      v.start.every((id) => v.instruments.includes(id)),
+  ),
 );
 
 console.log('ink');

@@ -110,7 +110,7 @@ audio, not compute**. The chain is:
 ```
 mixer tick (≤100ms) → embed, queued behind in-flight generate (≤146ms)
   → next chunk boundary (200ms) → server lead (600-800ms)
-  → browser lead-in (400ms)
+  → browser lead-in (1 s, more if the stream stutters)
 ```
 
 ### Chunk size is free
@@ -134,7 +134,9 @@ in larger chunks.
 - `DEFAULT_CHUNK_FRAMES` (5): frames per `generate()`. Lower is lower latency.
 - `MAX_LEAD_SECONDS` (0.6): server-side buffer. The throttle checks *before*
   generating, so effective lead settles at `MAX_LEAD + one chunk` (~800 ms).
-- `leadIn` in `src/audio/scheduler.ts` (0.4s): browser-side buffer.
+- `LEAD_IN` in `src/audio/scheduler.ts` (1 s): browser-side buffer. It grows by
+  half a second after each underrun, up to 3 s, so a slow stream stops
+  stuttering instead of restarting every few seconds.
 
 RTF 0.73 leaves 27% headroom to refill, so these are safe. Measured over 12s at
 the defaults: median inter-chunk gap 200 ms against a 200 ms chunk (exactly

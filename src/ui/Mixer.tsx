@@ -14,8 +14,10 @@ import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
 import type { EngineCapabilities } from '../audio/engine';
 import type { Action, MixConfig, Track } from '../core/types';
+import type { Vibe } from '../vision/eyes';
 import { ActionLog, type LogEntry } from './ActionLog';
 import { TrackRack } from './TrackRack';
+import { VibePicker } from './VibePicker';
 
 const SCALE_LABELS: Record<string, string> = {
   [Scale.SCALE_UNSPECIFIED]: 'Any key',
@@ -44,6 +46,9 @@ interface Props {
   dispatch: (action: Action) => void;
   config: MixConfig;
   capabilities: EngineCapabilities;
+  vibe: Vibe;
+  vibes: Vibe[];
+  onPickVibe: (vibe: Vibe) => void;
   follow: boolean;
   onFollowChange: (on: boolean) => void;
   canAsk: boolean;
@@ -274,6 +279,9 @@ export function Mixer({
   dispatch,
   config,
   capabilities,
+  vibe,
+  vibes,
+  onPickVibe,
   follow,
   onFollowChange,
   canAsk,
@@ -282,6 +290,7 @@ export function Mixer({
   log,
 }: Props) {
   const [tab, setTab] = useState<'mix' | 'history'>('mix');
+  const [choosingVibe, setChoosingVibe] = useState(false);
   const [ask, setAsk] = useState('');
 
   return (
@@ -336,6 +345,30 @@ export function Mixer({
               <p className="mt-0.5 font-display text-[1.6rem] leading-tight font-semibold tracking-[-0.02em] first-letter:uppercase">
                 {title}
               </p>
+              <div className="mt-3 flex items-center gap-2 text-[13px]">
+                <span className="text-muted-foreground">Vibe</span>
+                <span className="font-medium">{vibe.name}</span>
+                <button
+                  type="button"
+                  aria-expanded={choosingVibe}
+                  onClick={() => setChoosingVibe((open) => !open)}
+                  className="ml-auto rounded-full px-2.5 py-1 text-[12px] text-muted-foreground outline-none hover:bg-secondary hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
+                >
+                  {choosingVibe ? 'Done' : 'Change'}
+                </button>
+              </div>
+              {choosingVibe && (
+                <div className="mt-3">
+                  <VibePicker
+                    vibes={vibes}
+                    current={vibe.id}
+                    onPick={(v) => {
+                      onPickVibe(v);
+                      setChoosingVibe(false);
+                    }}
+                  />
+                </div>
+              )}
               <div className="mt-4 flex items-start gap-3">
                 <div className="min-w-0 flex-1">
                   <p className="text-[13px] font-medium">Follow my drawing</p>

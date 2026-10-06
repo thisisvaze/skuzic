@@ -146,7 +146,11 @@ export class LyriaEngine implements MusicEngine {
     });
   }
 
+  private pauseTimer: ReturnType<typeof setTimeout> | null = null;
+
   play(): void {
+    if (this.pauseTimer) clearTimeout(this.pauseTimer);
+    this.pauseTimer = null;
     // connect() resumes too, but it runs on page load where the browser will
     // not allow it. play() is only ever reached from a user gesture, so this is
     // the call that actually makes a suspended context audible.
@@ -156,13 +160,22 @@ export class LyriaEngine implements MusicEngine {
     this.setStatus('playing');
   }
 
-  pause(): void {
+  pause(fadeSeconds?: number): void {
     // Duck first: the model keeps streaming for a moment after pause(), and the
     // queue already holds seconds of audio. Without this the sound would run on
     // past the button press.
-    this.scheduler?.mute();
-    this.session?.pause();
+    this.scheduler?.mute(fadeSeconds);
     this.setStatus('paused');
+    if (this.pauseTimer) clearTimeout(this.pauseTimer);
+    this.pauseTimer = null;
+    if (!fadeSeconds) {
+      this.session?.pause();
+      return;
+    }
+    this.pauseTimer = setTimeout(() => {
+      this.pauseTimer = null;
+      this.session?.pause();
+    }, fadeSeconds * 1000);
   }
 
   stop(): void {

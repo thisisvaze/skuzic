@@ -1,5 +1,14 @@
 {
-  "ground": { "lyria": "dreamy lo-fi hip hop", "magenta": "lo-fi hip hop" },
+  "vibes": [
+    {"id": "blank", "name": "Just draw", "blurb": "Silence until your first mark. Your drawing picks the sound.", "ground": {"lyria": "dreamy lo-fi hip hop", "magenta": "lo-fi hip hop"}, "start": ["rhodes"], "instruments": ["rhodes", "piano", "guitar", "kalimba", "pads", "glockenspiel", "strings", "harp", "flute", "vibes"], "bpm": 90, "drums": true},
+    {"id": "lofi", "name": "Lo-fi", "blurb": "Dusty beats and warm Rhodes, right away.", "ground": {"lyria": "dreamy lo-fi hip hop", "magenta": "lo-fi hip hop"}, "start": ["rhodes"], "instruments": ["rhodes", "piano", "guitar", "kalimba", "pads", "glockenspiel", "strings", "harp", "flute", "vibes"], "bpm": 90, "drums": true},
+    {"id": "ambient", "name": "Ambient", "blurb": "Slow and floating, no beat.", "ground": {"lyria": "ambient soundscape", "magenta": "ambient"}, "start": ["pads"], "instruments": ["pads", "glockenspiel", "piano", "harp", "strings", "flute"], "bpm": 70, "drums": false},
+    {"id": "piano", "name": "Solo piano", "blurb": "Just a felt piano and you.", "ground": {"lyria": "solo felt piano", "magenta": "solo piano"}, "start": [], "instruments": [], "bpm": 72, "drums": false},
+    {"id": "folk", "name": "Indie folk", "blurb": "Fingerpicked guitar and open air.", "ground": {"lyria": "indie folk", "magenta": "indie folk"}, "start": ["guitar"], "instruments": ["guitar", "piano", "strings", "harp", "flute", "kalimba", "glockenspiel"], "bpm": 100, "drums": true},
+    {"id": "bossa", "name": "Bossa nova", "blurb": "Nylon strings and soft brushes.", "ground": {"lyria": "bossa nova", "magenta": "bossa nova"}, "start": ["guitar"], "instruments": ["guitar", "piano", "flute", "vibes", "strings", "rhodes"], "bpm": 116, "drums": true},
+    {"id": "jazz", "name": "Jazz café", "blurb": "Brushed drums and upright bass, late at night.", "ground": {"lyria": "cool jazz trio", "magenta": "cool jazz"}, "start": ["piano"], "instruments": ["piano", "vibes", "rhodes", "strings", "flute"], "bpm": 96, "drums": true},
+    {"id": "strings", "name": "String quartet", "blurb": "Bowed strings, close and warm.", "ground": {"lyria": "string quartet", "magenta": "string quartet"}, "start": [], "instruments": ["strings", "harp", "piano", "flute"], "bpm": 76, "drums": false}
+  ],
   "moodWeight": { "lyria": 0.45, "magenta": 0.8 },
   "moods": [
     {

@@ -10,6 +10,19 @@ const CHANNELS = 2;
 const MUTE_FADE = 0.2;
 
 /**
+ * Audio held before playback starts. Lyria sends 2 s chunks, and the second
+ * one lands about 2.5 s after the first, so anything much under a second runs
+ * dry right after every start: a stop, a gap and a restart, heard as a
+ * stutter. Measured in the browser: 0.4 s underran on every start.
+ */
+const LEAD_IN = 1.0;
+/** Each underrun mid-stream adds this much, up to MAX_LEAD, so a slow connection stops stuttering. */
+const LEAD_STEP = 0.5;
+const MAX_LEAD = 3;
+/** A chunk that restarts the stream after a gap fades in, so its first sample doesn't click. */
+const RESTART_FADE = 0.02;
+
+/**
  * A context reset drops every queued buffer, so there is an unavoidable gap
  * while the model regenerates. Ducking either side of it turns a click plus
  * abrupt re-entry into a deliberate-sounding swell.
@@ -44,10 +57,14 @@ export class PcmScheduler {
 
   /**
    * Audio held before playback starts, absorbing jitter in the stream. This is
-   * pure added latency on every steer, so keep it just above the worst
-   * inter-chunk gap rather than "comfortably large".
+   * added latency on every steer, so it starts at LEAD_IN and only grows when
+   * the stream proves it needs more.
    */
-  private readonly leadIn = 0.4;
+  private leadIn = LEAD_IN;
+  /** False until the first chunk after a flush: that one starting cold isn't an underrun. */
+  private flowing = false;
+  /** During a mute's fade chunks still come in, so the fade has music to fade. */
+  private acceptUntil = 0;
 
   /** The user's level, tracked separately so a mute can't overwrite it. */
   private volume: number;
@@ -132,9 +149,10 @@ export class PcmScheduler {
 
   /** Magenta bridge path: raw interleaved int16 over a binary WebSocket frame. */
   enqueueBytes(bytes: Uint8Array, rate: number = DEFAULT_SAMPLE_RATE): void {
-    // Chunks still in flight when pause was pressed. Queueing them would play
-    // them silently now and leave a stale tail to resume with.
-    if (this.muted) return;
+    // Chunks that land once a mute has faded out would play silently and leave
+    // a stale tail to resume with. During the fade they keep the music going;
+    // dropping them there made a long fade run dry and cut off instead.
+    if (this.muted && this.ctx.currentTime >= this.acceptUntil) return;
 
     // Copy into an aligned buffer: Int16Array requires an even byte offset.
     const pcm = new Int16Array(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + (bytes.byteLength & ~1)));
@@ -151,9 +169,13 @@ export class PcmScheduler {
 
     // Underrun (or first chunk): re-anchor ahead of the clock instead of
     // scheduling in the past, which would drop the chunk silently.
+    let restart = false;
     if (this.nextTime < this.ctx.currentTime + 0.05) {
+      if (this.flowing) this.leadIn = Math.min(MAX_LEAD, this.leadIn + LEAD_STEP);
       this.nextTime = this.ctx.currentTime + this.leadIn;
+      restart = this.flowing;
     }
+    this.flowing = true;
 
     // First chunk back after a reset: swell in exactly where the audio starts,
     // rather than arriving at full level mid-gap.
@@ -169,7 +191,14 @@ export class PcmScheduler {
 
     const source = this.ctx.createBufferSource();
     source.buffer = buffer;
-    source.connect(this.analyser);
+    if (restart) {
+      const fade = new GainNode(this.ctx, { gain: 0 });
+      fade.gain.setValueAtTime(0, this.nextTime);
+      fade.gain.linearRampToValueAtTime(1, this.nextTime + RESTART_FADE);
+      source.connect(fade).connect(this.analyser);
+    } else {
+      source.connect(this.analyser);
+    }
     source.start(this.nextTime);
     this.nextTime += buffer.duration;
 
@@ -226,7 +255,13 @@ export class PcmScheduler {
   mute(seconds = MUTE_FADE): void {
     if (this.muteTimer) clearTimeout(this.muteTimer);
     this.muted = true;
+    this.acceptUntil = this.ctx.currentTime + seconds;
     const now = this.holdGain();
+    const from = this.gain.gain.value;
+    // A straight line sounds like it gives up at the end; easing the level
+    // down in steps sounds like the music winding down.
+    this.gain.gain.linearRampToValueAtTime(from * 0.45, now + seconds * 0.4);
+    this.gain.gain.linearRampToValueAtTime(from * 0.12, now + seconds * 0.75);
     this.gain.gain.linearRampToValueAtTime(0, now + seconds);
     this.muteTimer = setTimeout(() => {
       this.muteTimer = null;
@@ -256,6 +291,7 @@ export class PcmScheduler {
     }
     this.sources.clear();
     this.nextTime = 0;
+    this.flowing = false;
   }
 
   async close(): Promise<void> {
