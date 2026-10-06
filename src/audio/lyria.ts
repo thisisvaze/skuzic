@@ -19,6 +19,35 @@ import { PcmScheduler } from './scheduler';
 
 export const MUSIC_MODEL = 'models/lyria-realtime-exp';
 
+/**
+ * Asks Google whether a pasted key can open Lyria, before anything is saved:
+ * one free read of the music model's details, so a typo, a restricted key or
+ * a country without Lyria shows up here instead of as a band that won't start.
+ * Resolves to null when the key works, or to what to tell the artist.
+ */
+export async function checkGeminiKey(key: string, fetchFn: typeof fetch = fetch): Promise<string | null> {
+  let res: Response;
+  try {
+    res = await fetchFn(`https://generativelanguage.googleapis.com/v1beta/${MUSIC_MODEL}`, {
+      headers: { 'x-goog-api-key': key },
+    });
+  } catch {
+    return "Couldn't reach Google. Check your connection and try again.";
+  }
+  // Rate limited still means Google knows the key.
+  if (res.ok || res.status === 429) return null;
+  if (res.status === 400 || res.status === 401) {
+    return "Google didn't accept this key. Copy it again from AI Studio and paste the whole thing.";
+  }
+  if (res.status === 403) {
+    return 'This key is restricted, or the Gemini API is off for its project. A new key from AI Studio works.';
+  }
+  if (res.status === 404) {
+    return "This key works, but Google doesn't offer Lyria RealTime to it yet, likely because of your country.";
+  }
+  return `Google couldn't check the key just now (error ${res.status}). Try again in a moment.`;
+}
+
 function toApiConfig(config: MixConfig): LiveMusicGenerationConfig {
   return {
     bpm: config.bpm,

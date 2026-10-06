@@ -42,8 +42,9 @@ pnpm install
 pnpm dev
 ```
 
-Paste a Gemini key from https://aistudio.google.com/apikey into the start
-overlay (or Settings → Gemini API key). It is stored in localStorage.
+**Start drawing** asks for a Gemini key from https://aistudio.google.com/apikey
+and checks it with Google (`checkGeminiKey` in `src/audio/lyria.ts`) before
+saving it to localStorage. Settings → Gemini API key changes or removes it.
 
 ### iOS
 

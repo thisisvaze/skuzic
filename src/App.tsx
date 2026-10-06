@@ -48,7 +48,7 @@ import {
 import { inkConfig, inkOf, type Ink } from './vision/ink';
 import { AbChoice } from './ui/AbChoice';
 import { ActionLog, type LogEntry } from './ui/ActionLog';
-import { ApiKeyField } from './ui/ApiKeyField';
+import { KeyDialog } from './ui/KeyDialog';
 import { DrawCanvas, type CanvasHandle } from './ui/DrawCanvas';
 import { Equalizer } from './ui/Equalizer';
 import { Landing, Wordmark } from './ui/Landing';
@@ -178,6 +178,7 @@ export default function App() {
     return saved in PLANNER_CONFIGS ? (saved as PlannerConfigId) : DEFAULT_PLANNER_CONFIG;
   });
   const [apiKey, setApiKey] = useState(() => load(KEYS.apiKey, ''));
+  const [keyDialogOpen, setKeyDialogOpen] = useState(false);
   const apiKeyRef = useRef(apiKey);
   apiKeyRef.current = apiKey;
 
@@ -1172,9 +1173,22 @@ export default function App() {
 
   /** The landing's button is also the gesture that lets the browser start audio. */
   const enterStudio = () => {
-    commitKey(apiKey);
+    if (!apiKeyRef.current) return setKeyDialogOpen(true);
     setView('studio');
     void start();
+  };
+
+  /**
+   * A key Google just accepted: save it and start the band on it. The audio
+   * may start suspended after the check's round trip; the first stroke, a
+   * gesture, resumes it.
+   */
+  const connectKey = (key: string) => {
+    commitKey(key);
+    setKeyDialogOpen(false);
+    setView('studio');
+    if (engineRef.current) void stop().then(() => start());
+    else void start();
   };
 
   return (
@@ -1289,28 +1303,16 @@ export default function App() {
               getLevels={getLevels}
               interpretDisabled={!connected || !!pendingAb}
               showStart={!connected}
-              onStart={() => {
-                commitKey(apiKey);
-                void start();
-              }}
-              startDisabled={!apiKey.trim() || status === 'connecting'}
+              onStart={() => (apiKey ? void start() : setKeyDialogOpen(true))}
+              startDisabled={status === 'connecting'}
               startTitle={
-                !apiKey.trim()
-                  ? 'Paste a Gemini API key to start the band'
+                !apiKey
+                  ? 'Connect your Gemini key to start the band'
                   : status === 'connecting'
                     ? 'Starting the band…'
                     : status === 'error'
                       ? statusDetail || 'Something went wrong. Try again.'
                       : 'Start the band, then draw'
-              }
-              startExtras={
-                !apiKey.trim() && (
-                  <ApiKeyField
-                    className="w-72 max-w-full text-left [&_a]:text-muted-foreground"
-                    value={apiKey}
-                    onChange={setApiKey}
-                  />
-                )
               }
               onAutoInterpret={() => void readDrawing()}
               onClear={fadeOut}
@@ -1385,16 +1387,10 @@ export default function App() {
         backend={state.backend}
         onBackendChange={(b) => void switchBackend(b)}
         apiKey={apiKey}
-        onApiKeyChange={setApiKey}
-        onApiKeyCommit={(key) => {
-          const trimmed = key.trim();
-          if (trimmed === load(KEYS.apiKey, '')) return;
-          commitKey(trimmed);
-          if (engineRef.current) {
-            void stop().then(() => {
-              if (trimmed) void start();
-            });
-          }
+        onConnectKey={() => setKeyDialogOpen(true)}
+        onRemoveKey={() => {
+          commitKey('');
+          void stop();
         }}
         plannerConfig={plannerConfig}
         onPlannerConfigChange={(c) => {
@@ -1422,10 +1418,10 @@ export default function App() {
         }}
       />
 
+      <KeyDialog open={keyDialogOpen} onClose={() => setKeyDialogOpen(false)} onConnect={connectKey} />
+
       {view === 'landing' && (
         <Landing
-          apiKey={apiKey}
-          onApiKeyChange={setApiKey}
           onStart={enterStudio}
           returning={connected}
         />

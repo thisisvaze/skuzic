@@ -43,10 +43,10 @@ pnpm install
 pnpm dev
 ```
 
-Open http://localhost:5173, paste a Gemini key from
-[aistudio.google.com/apikey](https://aistudio.google.com/apikey), hit **Start
-drawing**, and draw. The key stays in your browser; it is never baked into the
-build. The first visit also downloads SigLIP 2's image model (63 MB, cached
+Open http://localhost:5173, hit **Start drawing**, and connect a free Gemini
+key from [aistudio.google.com/apikey](https://aistudio.google.com/apikey) when
+it asks. skuzic checks the key with Google before saving it. It stays in your
+browser and is never baked into the build. The first visit also downloads SigLIP 2's image model (63 MB, cached
 after that).
 
 On iPad/iPhone: open `ios/Skuzic.xcodeproj`, run, then **Settings** (gear) and

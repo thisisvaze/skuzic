@@ -1,3 +1,4 @@
+import { checkGeminiKey } from '../src/audio/lyria';
 import { NOTES, attend, frictionLevel, mayPlay, nextNote, phrase } from '../src/audio/touch';
 import { DEFAULT_VIBE, chooseInstruments, chooseMood, isIntro, mixActions, nextMix, readPage, vibeById } from '../src/vision/eyes';
 import { inkConfig } from '../src/vision/ink';
@@ -268,6 +269,18 @@ check('ink never pushes the knobs out of their gentle range', [0, 0.5, 1].every(
   const k = inkConfig({ density: 0.85, brightness: 0.9 }, { coverage: c, warmth: w });
   return k.density <= 0.85 && k.density >= 0.15 && k.brightness <= 0.9 && k.brightness >= 0.15;
 })));
+
+console.log('key check');
+
+const google = (status: number) => async () => new Response(null, { status });
+check('a key Google accepts connects', (await checkGeminiKey('k', google(200))) === null);
+check('a rate-limited key still connects', (await checkGeminiKey('k', google(429))) === null);
+check('a rejected key says so', /didn't accept/.test((await checkGeminiKey('k', google(400))) ?? ''));
+check('a restricted key says so', /restricted/.test((await checkGeminiKey('k', google(403))) ?? ''));
+check('no Lyria for the key says so', /Lyria/.test((await checkGeminiKey('k', google(404))) ?? ''));
+check('no network says so', /reach Google/.test(
+  (await checkGeminiKey('k', async () => { throw new TypeError('offline'); })) ?? '',
+));
 
 console.log(failures ? `\n${failures} failure(s)` : '\nall passed');
 process.exit(failures ? 1 : 0);

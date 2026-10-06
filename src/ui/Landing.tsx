@@ -1,7 +1,6 @@
 import { ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { ApiKeyField } from './ApiKeyField';
 
 const GITHUB = 'https://github.com/thisisvaze/skuzic';
 
@@ -112,19 +111,14 @@ function DemoSheet() {
 }
 
 export function Landing({
-  apiKey,
-  onApiKeyChange,
   onStart,
   returning,
 }: {
-  apiKey: string;
-  onApiKeyChange: (key: string) => void;
+  /** Asks for a key first if there isn't one yet. */
   onStart: () => void;
   /** A session is already open behind this page. */
   returning: boolean;
 }) {
-  const hasKey = !!apiKey.trim();
-
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-background text-foreground">
       <div className="mx-auto flex min-h-full max-w-6xl flex-col px-5 sm:px-8">
@@ -158,27 +152,17 @@ export function Landing({
               follows: rain turns the room hazy, a sun opens it up. The song never stops. It bends.
             </p>
 
-            <form
-              className="mt-8 flex max-w-md flex-col gap-3"
-              onSubmit={(e) => {
-                e.preventDefault();
-                // The button stays lit without a key; it points at what's missing instead.
-                if (hasKey) onStart();
-                else document.getElementById('landing-key')?.focus();
-              }}
+            <Button
+              type="button"
+              variant="default"
+              className="mt-8 h-12 w-fit px-6 text-base [&_svg]:size-5"
+              onClick={onStart}
             >
-              {!hasKey && <ApiKeyField id="landing-key" value={apiKey} onChange={onApiKeyChange} />}
-              <Button
-                type="submit"
-                variant="default"
-                className="h-12 w-fit px-6 text-base [&_svg]:size-5"
-              >
-                {returning ? 'Back to drawing' : 'Start drawing'}
-                <ArrowRight />
-              </Button>
-            </form>
+              {returning ? 'Back to drawing' : 'Start drawing'}
+              <ArrowRight />
+            </Button>
             <p className="mt-4 text-sm text-muted-foreground/80">
-              Best with headphones. Needs a free Gemini API key, which stays in this browser.
+              Best with headphones. You'll connect a free Gemini key next. It stays in this browser.
             </p>
           </div>
 

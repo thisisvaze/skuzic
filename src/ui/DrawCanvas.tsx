@@ -236,7 +236,6 @@ interface Props {
   onStart?: () => void;
   startDisabled?: boolean;
   startTitle?: string;
-  startExtras?: ReactNode;
 }
 
 /**
@@ -256,7 +255,6 @@ export const DrawCanvas = forwardRef<CanvasHandle, Props>(function DrawCanvas(
     onStart,
     startDisabled,
     startTitle,
-    startExtras,
   },
   ref,
 ) {
@@ -768,7 +766,6 @@ export const DrawCanvas = forwardRef<CanvasHandle, Props>(function DrawCanvas(
                 <Play className="translate-x-0.5" />
               </Button>
               {startTitle && <p className="max-w-xs text-[15px] font-medium text-pencil/70">{startTitle}</p>}
-              {startExtras}
             </div>
           )}
         </div>

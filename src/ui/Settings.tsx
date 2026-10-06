@@ -7,7 +7,6 @@ import { cn } from '@/lib/utils';
 import type { Backend } from '../core/types';
 import { PLANNER_CONFIG_LIST, type PlannerConfigId } from '../llm/configs';
 import { PLANNER_MODELS, type PlannerModel } from '../llm/planner';
-import { ApiKeyField } from './ApiKeyField';
 
 export type Theme = 'system' | 'light' | 'dark';
 
@@ -32,8 +31,9 @@ interface Props {
   backend: Backend;
   onBackendChange: (backend: Backend) => void;
   apiKey: string;
-  onApiKeyChange: (key: string) => void;
-  onApiKeyCommit: (key: string) => void;
+  /** Opens the key dialog, to connect a first key or swap it. */
+  onConnectKey: () => void;
+  onRemoveKey: () => void;
   plannerConfig: PlannerConfigId;
   onPlannerConfigChange: (config: PlannerConfigId) => void;
   plannerModel: PlannerModel;
@@ -148,8 +148,8 @@ export function Settings({
   backend,
   onBackendChange,
   apiKey,
-  onApiKeyChange,
-  onApiKeyCommit,
+  onConnectKey,
+  onRemoveKey,
   plannerConfig,
   onPlannerConfigChange,
   plannerModel,
@@ -220,9 +220,26 @@ export function Settings({
 
           <Group
             title="Gemini API key"
-            hint="Lyria and Reimagine both use it. It stays in this browser."
+            hint="Lyria and Reimagine both use it. It's saved only in this browser and only ever sent to Google."
           >
-            <ApiKeyField value={apiKey} onChange={onApiKeyChange} onCommit={onApiKeyCommit} />
+            {apiKey ? (
+              <div className="flex items-center gap-2 rounded-2xl bg-card py-2 pr-2 pl-4">
+                <span className="min-w-0 flex-1 text-[14px]">
+                  Connected{' '}
+                  <span className="text-muted-foreground">· key ending in {apiKey.slice(-4)}</span>
+                </span>
+                <Button size="sm" variant="ghost" onClick={onConnectKey}>
+                  Change
+                </Button>
+                <Button size="sm" variant="destructive" onClick={onRemoveKey}>
+                  Remove
+                </Button>
+              </div>
+            ) : (
+              <Button className="self-start" onClick={onConnectKey}>
+                Connect your Gemini key
+              </Button>
+            )}
           </Group>
 
           <Group
