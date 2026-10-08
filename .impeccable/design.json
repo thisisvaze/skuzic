@@ -1,0 +1,316 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-07T00:00:00Z",
+  "title": "Design System: skuzic",
+  "extensions": {
+    "colorMeta": {
+      "wall": {
+        "role": "neutral",
+        "displayName": "Whitewash",
+        "canonical": "oklch(96.1% 0.005 95)",
+        "tonalRamp": [
+          "oklch(15% 0.003 95)",
+          "oklch(25% 0.003 95)",
+          "oklch(36% 0.005 95)",
+          "oklch(47% 0.005 95)",
+          "oklch(58% 0.005 95)",
+          "oklch(70% 0.005 95)",
+          "oklch(82% 0.005 95)",
+          "oklch(95% 0.003 95)"
+        ]
+      },
+      "wire": {
+        "role": "neutral",
+        "displayName": "Steel Wire",
+        "canonical": "oklch(20.1% 0.003 68)",
+        "tonalRamp": [
+          "oklch(15% 0.002 68)",
+          "oklch(25% 0.002 68)",
+          "oklch(36% 0.003 68)",
+          "oklch(47% 0.003 68)",
+          "oklch(58% 0.003 68)",
+          "oklch(70% 0.003 68)",
+          "oklch(82% 0.003 68)",
+          "oklch(95% 0.002 68)"
+        ]
+      },
+      "ink-soft": {
+        "role": "neutral",
+        "displayName": "Pencil Grey",
+        "canonical": "oklch(44.4% 0.011 78)",
+        "tonalRamp": [
+          "oklch(15% 0.005 78)",
+          "oklch(25% 0.005 78)",
+          "oklch(36% 0.011 78)",
+          "oklch(47% 0.011 78)",
+          "oklch(58% 0.011 78)",
+          "oklch(70% 0.011 78)",
+          "oklch(82% 0.011 78)",
+          "oklch(95% 0.005 78)"
+        ]
+      },
+      "vermilion": {
+        "role": "primary",
+        "displayName": "Signal Vermilion",
+        "canonical": "oklch(57.6% 0.206 31)",
+        "tonalRamp": [
+          "oklch(15% 0.103 31)",
+          "oklch(25% 0.103 31)",
+          "oklch(36% 0.206 31)",
+          "oklch(47% 0.206 31)",
+          "oklch(58% 0.206 31)",
+          "oklch(70% 0.206 31)",
+          "oklch(82% 0.206 31)",
+          "oklch(95% 0.103 31)"
+        ]
+      },
+      "cobalt": {
+        "role": "secondary",
+        "displayName": "Enamel Cobalt",
+        "canonical": "oklch(44.8% 0.183 265)",
+        "tonalRamp": [
+          "oklch(15% 0.091 265)",
+          "oklch(25% 0.091 265)",
+          "oklch(36% 0.183 265)",
+          "oklch(47% 0.183 265)",
+          "oklch(58% 0.183 265)",
+          "oklch(70% 0.183 265)",
+          "oklch(82% 0.183 265)",
+          "oklch(95% 0.091 265)"
+        ]
+      },
+      "chrome": {
+        "role": "tertiary",
+        "displayName": "Chrome Yellow",
+        "canonical": "oklch(81.1% 0.166 85)",
+        "tonalRamp": [
+          "oklch(15% 0.083 85)",
+          "oklch(25% 0.083 85)",
+          "oklch(36% 0.166 85)",
+          "oklch(47% 0.166 85)",
+          "oklch(58% 0.166 85)",
+          "oklch(70% 0.166 85)",
+          "oklch(82% 0.166 85)",
+          "oklch(95% 0.083 85)"
+        ]
+      },
+      "on-vermilion": {
+        "role": "neutral",
+        "displayName": "Plate White",
+        "canonical": "oklch(100% 0 0)"
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "The hook only."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Section statements."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Short sentences heading a station."
+      },
+      "lead": {
+        "displayName": "Lead",
+        "purpose": "First paragraph under a statement."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Explanatory copy, in Pencil Grey."
+      },
+      "body-sm": {
+        "displayName": "Body small",
+        "purpose": "Nav, mix lists, blurbs, notes."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Small names over a list or under a drawing, sentence case."
+      }
+    },
+    "shadows": [
+      {
+        "name": "wire-cast",
+        "value": "2px 4px 3px rgb(23 22 21 / 0.12)",
+        "purpose": "Every stroke on the wall and wire drawings."
+      },
+      {
+        "name": "plate-rest",
+        "value": "2px 5px 8px rgb(23 22 21 / 0.14)",
+        "purpose": "The Make music plate at rest."
+      },
+      {
+        "name": "plate-lift",
+        "value": "3px 7px 11px rgb(23 22 21 / 0.16)",
+        "purpose": "Make music on hover."
+      },
+      {
+        "name": "plate-press",
+        "value": "1px 2px 4px rgb(23 22 21 / 0.16)",
+        "purpose": "Make music while pressed."
+      },
+      {
+        "name": "hung-plate",
+        "value": "drop-shadow(2px 5px 4px rgb(23 22 21 / 0.14))",
+        "purpose": "Vibe plates (filter)."
+      }
+    ],
+    "motion": [
+      {
+        "name": "ease-settle",
+        "value": "cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "Plate hover, press and turn transitions."
+      },
+      {
+        "name": "plate-hover",
+        "value": "300ms",
+        "purpose": "Make music filter and shadow change."
+      },
+      {
+        "name": "vibe-turn",
+        "value": "700ms",
+        "purpose": "Vibe plate turning about its wire on hover."
+      },
+      {
+        "name": "vibe-sounding",
+        "value": "2.6s ease-in-out infinite alternate",
+        "purpose": "A sounding vibe plate turning back and forth."
+      },
+      {
+        "name": "plate-sway",
+        "value": "damped spring k 30, c 3.2, max 0.06 rad",
+        "purpose": "The pinned plate stirred by the pen's air; held under reduced motion."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "sm",
+        "value": "40rem"
+      },
+      {
+        "name": "lg",
+        "value": "64rem"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Make music plate",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The one action: a vermilion disc pinned to the wall on a short wire.",
+      "html": "<div class=\"ds-pinned\"><span class=\"ds-pin\"></span><span class=\"ds-pin-wire\"></span><button class=\"ds-plate\">Make music</button></div>",
+      "css": ".ds-pinned{display:flex;flex-direction:column;align-items:center} .ds-pin{width:10px;height:10px;border-radius:9999px;background:var(--color-wire,#171615)} .ds-pin-wire{width:2.5px;height:16px;background:var(--color-wire,#171615)} .ds-plate{font-family: 'Libre Franklin', ui-sans-serif, system-ui, sans-serif;width:12rem;aspect-ratio:1;border:none;border-radius:9999px;background:var(--color-vermilion,#d8301c);color:#fff;font-weight:700;font-size:1.25rem;line-height:1.1;padding:0 14%;box-shadow:2px 5px 8px rgb(23 22 21 / 0.14);transition:filter 300ms cubic-bezier(0.16, 1, 0.3, 1),box-shadow 300ms cubic-bezier(0.16, 1, 0.3, 1);cursor:pointer} .ds-plate:hover{filter:brightness(0.93);box-shadow:3px 7px 11px rgb(23 22 21 / 0.16)} .ds-plate:active{filter:brightness(0.88);box-shadow:1px 2px 4px rgb(23 22 21 / 0.16)} .ds-plate:focus-visible{outline:3px solid var(--color-wire,#171615);outline-offset:4px}"
+    },
+    {
+      "name": "Vibe plate",
+      "kind": "custom",
+      "refersTo": "vibe-plate",
+      "description": "A cobalt cut plate hanging on its own length of wire; vermilion while its sample sounds.",
+      "html": "<div class=\"ds-vibe\"><button class=\"ds-vibe-plate\" aria-pressed=\"false\"><svg viewBox=\"-80 0 164 144\" width=\"112\"><path d=\"M0 0C44 4 82 40 74 88C67 128 22 140-16 124C-56 108-64 58-42 26C-30 9-15 1 0 0Z\"/></svg><span class=\"ds-vibe-name\">Lo-fi</span><span class=\"ds-vibe-act\">Hear a sample</span></button></div>",
+      "css": ".ds-vibe{font-family: 'Libre Franklin', ui-sans-serif, system-ui, sans-serif;position:relative;border-top:3px solid var(--color-wire,#171615);padding-top:2.5rem;width:10rem;color:var(--color-wire,#171615)} .ds-vibe::before{content:'';position:absolute;top:0;left:3.4rem;width:2.5px;height:2.5rem;background:var(--color-wire,#171615)} .ds-vibe-plate{background:none;border:none;padding:0;text-align:left;color:inherit;font:inherit;cursor:pointer} .ds-vibe-plate svg{display:block;fill:var(--color-cobalt,#1f48b8);transform-origin:48.8% 0;filter:drop-shadow(2px 5px 4px rgb(23 22 21 / 0.14));transition:transform 700ms cubic-bezier(0.16, 1, 0.3, 1)} .ds-vibe-plate:hover svg{transform:perspective(40rem) rotateY(55deg)} .ds-vibe-plate[aria-pressed='true'] svg{fill:var(--color-vermilion,#d8301c)} .ds-vibe-plate:focus-visible{outline:3px solid var(--color-wire,#171615);outline-offset:4px} .ds-vibe-name{display:block;margin-top:1rem;font-size:1.1875rem;font-weight:700;line-height:1.25} .ds-vibe-plate:hover .ds-vibe-name{text-decoration:underline} .ds-vibe-act{display:block;margin-top:0.25rem;font-size:0.8125rem;font-weight:600}"
+    },
+    {
+      "name": "Mix list",
+      "kind": "custom",
+      "refersTo": null,
+      "description": "Layers of the music as role and value; the worked example in How it works.",
+      "html": "<ul class=\"ds-mix\"><li><span class=\"ds-mix-role\">style</span><span class=\"ds-mix-val\">dreamy lo-fi hip hop</span></li><li><span class=\"ds-mix-role\">instrument</span><span class=\"ds-mix-val\">gentle harp arpeggios</span></li><li><span class=\"ds-mix-role\">mood</span><span class=\"ds-mix-val\">radiant and uplifting</span></li></ul>",
+      "css": ".ds-mix{font-family: 'Libre Franklin', ui-sans-serif, system-ui, sans-serif;list-style:none;margin:0;padding:0;display:grid;gap:0.375rem;font-size:0.9375rem;line-height:1.375;color:var(--color-wire,#171615)} .ds-mix li{display:grid;grid-template-columns:6.5rem 1fr;column-gap:0.75rem} .ds-mix-role{font-weight:600;display:flex;align-items:center;gap:0.5rem} .ds-mix-val{color:var(--color-ink-soft,#57534d)} .ds-dot{width:8px;height:8px;border-radius:9999px;background:var(--color-chrome,#f2b705);transition:background-color 150ms} .ds-mix li:hover .ds-dot{background:var(--color-vermilion,#d8301c)}"
+    },
+    {
+      "name": "Museum label",
+      "kind": "custom",
+      "refersTo": "museum-label",
+      "description": "A 2px wire rule and a small label under an example drawing.",
+      "html": "<div class=\"ds-label\"><p class=\"ds-label-name\">Sun over the sea</p><p class=\"ds-label-note\">An example drawing. skuzic read it as Sunshine.</p></div>",
+      "css": ".ds-label{font-family: 'Libre Franklin', ui-sans-serif, system-ui, sans-serif;max-width:24rem;border-top:2px solid var(--color-wire,#171615);padding-top:0.625rem;font-size:0.8125rem;line-height:1.375;color:var(--color-wire,#171615)} .ds-label p{margin:0} .ds-label-name{font-weight:600} .ds-label-note{color:var(--color-ink-soft,#57534d)}"
+    },
+    {
+      "name": "Text link",
+      "kind": "button",
+      "refersTo": "text-link",
+      "description": "Wire text with a thick offset underline; warms to cobalt when it leads further in.",
+      "html": "<a class=\"ds-link\" href=\"#\">Read the code on GitHub</a>",
+      "css": ".ds-link{font-family: 'Libre Franklin', ui-sans-serif, system-ui, sans-serif;color:var(--color-wire,#171615);font-weight:600;font-size:1.0625rem;text-decoration:underline;text-decoration-thickness:2px;text-underline-offset:0.2em;transition:color 150ms} .ds-link:hover{color:var(--color-cobalt,#1f48b8)} .ds-link:focus-visible{outline:3px solid var(--color-wire,#171615);outline-offset:4px}"
+    },
+    {
+      "name": "Navigation",
+      "kind": "nav",
+      "refersTo": null,
+      "description": "Plain wordmark and two links on the wall, no bar.",
+      "html": "<header class=\"ds-nav\"><span class=\"ds-nav-mark\">skuzic</span><nav><a href=\"#\">How it works</a><a href=\"#\">GitHub</a></nav></header>",
+      "css": ".ds-nav{font-family: 'Libre Franklin', ui-sans-serif, system-ui, sans-serif;display:flex;align-items:center;justify-content:space-between;padding:1.5rem clamp(1.25rem,4vw,4rem);background:var(--color-wall,#f3f2ee);color:var(--color-wire,#171615)} .ds-nav-mark{font-size:1.6rem;line-height:1;font-weight:800;letter-spacing:-0.03em} .ds-nav nav{display:flex;gap:1.5rem;font-size:0.9375rem;font-weight:500} .ds-nav a{color:inherit;text-decoration:none;text-decoration-thickness:2px;text-underline-offset:0.2em} .ds-nav a:hover{text-decoration:underline} .ds-nav a:focus-visible{outline:3px solid var(--color-wire,#171615);outline-offset:4px}"
+    },
+    {
+      "name": "Station",
+      "kind": "card",
+      "refersTo": null,
+      "description": "A step hung below a shared 3px wire rule at its own drop; not a card.",
+      "html": "<div class=\"ds-stations\"><article style=\"padding-top:2.5rem\"><h3>Every mark rings at once.</h3><p>A soft piano answers, always in key.</p></article><article style=\"padding-top:7rem\"><h3>Lift the pen, and it reads the page.</h3><p>Nothing is uploaded.</p></article></div>",
+      "css": ".ds-stations{font-family: 'Libre Franklin', ui-sans-serif, system-ui, sans-serif;display:grid;grid-template-columns:1fr 1fr;column-gap:3rem;border-top:3px solid var(--color-wire,#171615);color:var(--color-wire,#171615)} .ds-stations h3{margin:0;font-size:1.5rem;font-weight:700;line-height:1.25;letter-spacing:-0.015em} .ds-stations p{margin:0.75rem 0 0;max-width:36ch;font-size:1.0625rem;line-height:1.625;color:var(--color-ink-soft,#57534d)}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Wire Wall",
+    "overview": "**Creative North Star: \"The Wire Wall\"**\n\nskuzic is a whitewashed wall in daylight. Every line on it is black steel wire: the visitor's strokes, the rules between sections, the pin that holds a plate. Matte painted plates, cut like Calder's, hang from that wire, and color lives only on them. The drawing is the whole show; everything else on the wall stays quiet, set like museum wall lettering in Libre Franklin, large and tight for statements, small and exact for labels.\n\nThe density is low and the wall is open. Words sit low and to the edges so there is room to draw; with a fine pointer you can draw straight through them. Depth is a light, small cast shadow, the kind wire and tin throw on plaster, never a lifted card. Motion is physical and brief: a plate sways on its pin in the air the pen makes, then hangs still; a vibe plate turns about its own wire.\n\nThe world is light only, whatever the OS theme. It rejects the gradient headline, the tilted product card and three feature cards, and the dark waveform music app.",
+    "keyCharacteristics": [
+      "One ground (the wall), one line (the wire), three paints on plates (vermilion, cobalt, chrome).",
+      "Every stroke, divider and pin is wire; nothing decorative is drawn.",
+      "Libre Franklin throughout: extra-bold, tightly tracked statements and small semibold labels.",
+      "Light, small shadows only, cast down and to the right.",
+      "Light only; no dark theme."
+    ],
+    "rules": [
+      {
+        "name": "The One Red Rule",
+        "body": "Vermilion is reserved for the one action and for whatever is sounding. If it is neither, it is not red. A vibe plate turns vermilion only while it plays.",
+        "section": "colors"
+      },
+      {
+        "name": "The Paint Means Something Rule",
+        "body": "Color appears only on plates and in text selection, each paint with a fixed meaning: vermilion acts or sounds, cobalt is the music, chrome is the pen. No color fills, tints or gradients on the wall.",
+        "section": "colors"
+      },
+      {
+        "name": "The Daylight Rule",
+        "body": "The world is light only. Do not ship a dark variant or follow `prefers-color-scheme` on the page.",
+        "section": "colors"
+      },
+      {
+        "name": "The Wall Lettering Rule",
+        "body": "Statements are extra-bold, tight and short; labels are small, semibold and sentence case. Nothing in between shouts, and nothing is uppercase-tracked.",
+        "section": "typography"
+      },
+      {
+        "name": "The Plain Words Rule",
+        "body": "Copy says \"the music\", never \"the band\", and uses no em dashes.",
+        "section": "typography"
+      },
+      {
+        "name": "The Light Shadow Rule",
+        "body": "Shadows stay light and small. If a shadow reads before the object does, it is too much.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "**Do** keep the wall (`wall`) as the only background and draw every line, rule and pin in wire (`wire`).",
+      "**Do** keep vermilion for the one action and whatever is sounding; paint the music cobalt and the pen chrome.",
+      "**Do** set statements in Libre Franklin 800 with tight tracking, and labels small, semibold and sentence case.",
+      "**Do** keep shadows light and small, cast down and right from one source.",
+      "**Do** hang things from a wire rule at different lengths when a row should read in order.",
+      "**Do** honor reduced motion: plates hold still.",
+      "**Do** say \"the music\", never \"the band\", and write without em dashes."
+    ],
+    "donts": [
+      "**Don't** add a dark theme; the world is light only, whatever the OS theme.",
+      "**Do** use the shared iPad brush-and-sound logo with its orange-pink-violet gradient everywhere. Keep that gradient inside the brand mark; headings stay in ink.",
+      "**Don't** build a hanging mobile or balancing weights; the user tried and rejected them.",
+      "**Don't** use a second red element on a screen that is neither the action nor sounding.",
+      "**Don't** use heavy, dark or hard-edged shadows.",
+      "**Don't** reach for a gradient headline, a tilted product card, three feature cards, or a dark waveform music look."
+    ]
+  }
+}

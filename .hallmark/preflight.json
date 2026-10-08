@@ -1,0 +1,9 @@
+{
+  "date": "2026-10-07",
+  "scope": "landing",
+  "system": "DESIGN.md",
+  "font": "Libre Franklin",
+  "palette": "existing paper, ink, pencils and watercolor blue",
+  "framework": "React + Vite + Tailwind",
+  "motion": "existing hand sketch and watercolor hover; reduced motion supported"
+}
