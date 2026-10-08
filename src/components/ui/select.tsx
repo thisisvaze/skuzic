@@ -35,10 +35,14 @@ function SelectContent({
   className,
   children,
   position = 'popper',
+  container,
   ...props
-}: React.ComponentProps<typeof SelectPrimitive.Content>) {
+}: React.ComponentProps<typeof SelectPrimitive.Content> & {
+  /** Keep menus in the top layer when the trigger lives inside a native dialog. */
+  container?: React.ComponentProps<typeof SelectPrimitive.Portal>['container'];
+}) {
   return (
-    <SelectPrimitive.Portal>
+    <SelectPrimitive.Portal container={container}>
       <SelectPrimitive.Content
         data-slot="select-content"
         position={position}

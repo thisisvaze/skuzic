@@ -5,7 +5,7 @@ import {
   type LiveMusicServerMessage,
   type LiveMusicSession,
 } from '@google/genai';
-import type { MixConfig } from '../core/types';
+import { CALM, inCalm, type MixConfig } from '../core/types';
 import { geminiAuth } from '../lib/relay';
 import {
   CAPABILITIES,
@@ -49,11 +49,11 @@ export async function checkGeminiKey(key: string, fetchFn: typeof fetch = fetch)
   return `Google couldn't check the key just now (error ${res.status}). Try again in a moment.`;
 }
 
-function toApiConfig(config: MixConfig): LiveMusicGenerationConfig {
+export function toApiConfig(config: MixConfig): LiveMusicGenerationConfig {
   return {
     bpm: config.bpm,
-    density: config.density,
-    brightness: config.brightness,
+    density: inCalm(CALM.density, config.density),
+    brightness: inCalm(CALM.brightness, config.brightness),
     guidance: config.guidance,
     muteBass: config.muteBass,
     muteDrums: config.muteDrums,
@@ -105,7 +105,7 @@ export class LyriaEngine implements MusicEngine {
     this.setStatus('connecting');
 
     this.scheduler = new PcmScheduler(this.masterVolume);
-    await this.scheduler.resume();
+    this.scheduler.resume();
     await this.open();
   }
 
@@ -230,7 +230,7 @@ export class LyriaEngine implements MusicEngine {
     // connect() resumes too, but it runs on page load where the browser will
     // not allow it. play() is only ever reached from a user gesture, so this is
     // the call that actually makes a suspended context audible.
-    void this.scheduler?.resume();
+    this.scheduler?.resume();
     this.scheduler?.unmute();
     this.session?.play();
     this.setStatus('playing');

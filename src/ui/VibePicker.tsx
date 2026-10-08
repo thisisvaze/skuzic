@@ -176,11 +176,15 @@ function Card({ vibe, on, onPick }: { vibe: Vibe; on: boolean; onPick: (vibe: Vi
       title={vibe.blurb}
       onClick={() => onPick(vibe)}
       className={cn(
-        'group flex min-w-0 flex-col overflow-hidden rounded-xl bg-popover text-left text-foreground shadow-sm outline-none',
-        'transition-shadow duration-200 focus-visible:ring-2 focus-visible:ring-ring/60',
+        'group flex min-w-0 flex-col overflow-hidden rounded-md bg-popover text-left text-foreground shadow-sm',
+        'transition-[outline-color,box-shadow] duration-200 focus-visible:ring-2 focus-visible:ring-ring/60',
         // Quiet on purpose: a hover darkens the edge, the chosen one gets a thin
         // violet edge and a dot. No lift, which the scrolling strip would clip.
-        on ? 'ring-[1.5px] ring-brand-3/60' : 'ring-1 ring-border hover:ring-foreground/20',
+        // The edge is an inset outline drawn over the art, like the iPad's
+        // strokeBorder, so no light seam shows at the corners.
+        on
+          ? 'outline-[1.5px] -outline-offset-[1.5px] outline-brand-3/60'
+          : 'outline-1 -outline-offset-1 outline-border hover:outline-foreground/20',
       )}
     >
       <svg

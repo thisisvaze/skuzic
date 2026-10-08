@@ -5,20 +5,18 @@
 
 export const KEYS = {
   apiKey: 'skuzic_key',
-  // v2: auto interpret now reads the page with SigLIP on pen-up and defaults on.
-  // A stored "off" from the Gemini-only build would quietly hide that.
-  autoInterpret: 'skuzic_auto_interpret_v2',
   abTest: 'skuzic_ab_test',
+  follow: 'skuzic_gemini_follows',
   backend: 'skuzic_backend',
   // Versioned for the same reason as `config`: a stored pick from an earlier
   // build outranks the default forever, so a changed default needs a new key.
   plannerModel: 'skuzic_planner_model_v3',
   plannerConfig: 'skuzic_planner_config_v2',
-  masterVolume: 'skuzic_master_volume',
   inkColor: 'skuzic_ink_color',
   brushSize: 'skuzic_brush_size',
   brushOpacity: 'skuzic_brush_opacity',
-  paperSound: 'skuzic_paper_sound',
+  medium: 'skuzic_medium',
+  brushSound: 'skuzic_brush_sound',
   theme: 'skuzic_theme',
   mixerOpen: 'skuzic_mixer_open',
   vibe: 'skuzic_vibe',
@@ -27,6 +25,7 @@ export const KEYS = {
   // and guidance in INITIAL_CONFIG are the sound of the instrument, not a user
   // preference worth preserving through a retune — bump this when they change.
   config: 'skuzic_config_v2',
+  configLocks: 'skuzic_config_locks',
 } as const;
 
 /** Storage is unavailable in private mode and full quotas; never let it throw. */

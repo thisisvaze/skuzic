@@ -80,11 +80,15 @@ export class PcmScheduler {
     this.gain.gain.value = volume;
 
     // Sources -> analyser -> gain -> out. Tapping ahead of the gain keeps the
-    // meter reading the music rather than the volume slider, so turning down
-    // doesn't flatten the bars.
+    // meter reading the music rather than the master volume, so muting an
+    // A/B arm doesn't flatten the bars.
     this.analyser = this.ctx.createAnalyser();
     this.analyser.fftSize = 256;
     this.analyser.smoothingTimeConstant = 0.72;
+    // The default -100 to -30 dB window tops out below ordinary music, so
+    // every band read as nearly full and the meter sat at its maximum.
+    this.analyser.minDecibels = -90;
+    this.analyser.maxDecibels = -10;
     this.analyser.connect(this.gain);
     this.gain.connect(this.ctx.destination);
 
@@ -128,18 +132,14 @@ export class PcmScheduler {
   }
 
   /**
-   * The context is constructed on page load, which is outside a user gesture,
-   * so the browser hands it back suspended and refuses this resume. That is
-   * recoverable — the next resume from a real gesture succeeds — but only if
-   * the rejection does not take connect() down with it.
+   * Fire and forget, never awaited. A context made on page load, before any
+   * gesture, comes back suspended, and Chromium neither starts it nor rejects
+   * this resume: the promise just waits for a later resume after a gesture.
+   * connect() used to await it, so a band started on load hung on "Starting
+   * the band…" for good. play() calls this again once the page has been touched.
    */
-  async resume(): Promise<void> {
-    if (this.ctx.state !== 'suspended') return;
-    try {
-      await this.ctx.resume();
-    } catch {
-      // Blocked by the autoplay policy. play() resumes again on a gesture.
-    }
+  resume(): void {
+    if (this.ctx.state === 'suspended') this.ctx.resume().catch(() => {});
   }
 
   /** Lyria path: base64 chunks with the rate carried in the MIME type. */
@@ -233,8 +233,8 @@ export class PcmScheduler {
 
   setVolume(v: number): void {
     this.volume = v;
-    // While muted the level is remembered but not applied, so dragging the
-    // volume slider during a pause can't undo the mute.
+    // While muted the level is remembered but not applied, so setting the
+    // volume during a pause can't undo the mute.
     if (!this.muted) this.gain.gain.setTargetAtTime(v, this.ctx.currentTime, 0.05);
   }
 

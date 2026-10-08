@@ -1,29 +1,25 @@
-import { useEffect, useRef, type ReactNode } from 'react';
-import { Monitor, Moon, Sun, X } from 'lucide-react';
+import { useEffect, useId, useState, type ReactNode } from 'react';
+import { ChevronDown, Monitor, Moon, Sun, X } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
-import { cn } from '@/lib/utils';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import type { Backend } from '../core/types';
 import { PLANNER_CONFIG_LIST, type PlannerConfigId } from '../llm/configs';
 import { PLANNER_MODELS, type PlannerModel } from '../llm/planner';
+import './settings.css';
 
 export type Theme = 'system' | 'light' | 'dark';
 
 const BRIDGE_HELP = 'https://github.com/thisisvaze/skuzic/blob/main/server/README.md';
 
-const ENGINES: { id: Backend; name: string; blurb: string }[] = [
-  {
-    id: 'lyria',
-    name: 'Lyria RealTime',
-    blurb: "Google's music model, in the cloud. Every knob works. Uses your Gemini key.",
-  },
-  {
-    id: 'magenta',
-    name: 'Magenta RT',
-    blurb: 'Offline, on your own Mac. Only when you run skuzic locally with the Magenta bridge set up.',
-  },
-];
+const RESPONSE_HINTS: Record<PlannerConfigId, string> = {
+  sparse: 'Start quiet. Add more sound as your drawing grows.',
+  vibe1: 'Keep the music in tune with the whole scene.',
+  realvibe: 'Make a fresh mix each time the drawing is read.',
+  sounds: 'Turn the scene into sounds, like rain or birdsong.',
+  continuity: 'Let new marks nudge the music along.',
+};
 
 interface Props {
   open: boolean;
@@ -42,6 +38,9 @@ interface Props {
   onPlannerModelChange: (model: PlannerModel) => void;
   abTest: boolean;
   onAbTestChange: (on: boolean) => void;
+  /** Gemini refines the music every few seconds while the page changes. */
+  follow: boolean;
+  onFollowChange: (on: boolean) => void;
   /** Preference pairs saved so far — see src/lib/dataset.ts. */
   datasetCount: number;
   onExportDataset: () => void;
@@ -51,277 +50,205 @@ interface Props {
   onDisconnect: () => void;
 }
 
-function Group({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {
+
+/** Native radios keep Tab and arrow-key navigation familiar. */
+function Appearance({ value, onChange }: { value: Theme; onChange: (theme: Theme) => void }) {
+  const name = useId();
   return (
-    <section className="flex flex-col gap-3">
-      <div>
-        <h3 className="text-[15px] font-semibold">{title}</h3>
-        {hint && <p className="mt-0.5 text-[13px] leading-snug text-muted-foreground">{hint}</p>}
+    <fieldset className="settings-appearance">
+      <legend>Appearance</legend>
+      <div className="settings-segments">
+        {([
+          { id: 'system', label: 'System', Icon: Monitor },
+          { id: 'light', label: 'Light', Icon: Sun },
+          { id: 'dark', label: 'Dark', Icon: Moon },
+        ] as const).map(({ id, label, Icon }) => (
+          <label key={id}>
+            <input type="radio" name={name} value={id} checked={value === id} onChange={() => onChange(id)} />
+            <span><Icon size={15} aria-hidden="true" />{label}</span>
+          </label>
+        ))}
       </div>
-      {children}
-    </section>
+    </fieldset>
   );
 }
 
-/** One of a few, as tiles. Radio semantics, so arrow keys and screen readers know the shape. */
-function Choice<T extends string>({
-  label,
-  value,
-  options,
-  onChange,
-  columns,
-}: {
+/** The shared Select, portalled inside the native dialog's focus boundary. */
+function SettingSelect<T extends string>({ label, value, options, hint, onChange, container }: {
   label: string;
   value: T;
-  options: { id: T; title: ReactNode; detail?: string }[];
-  onChange: (id: T) => void;
-  columns?: boolean;
+  options: { id: T; label: string }[];
+  hint: string;
+  onChange: (value: T) => void;
+  container: HTMLDialogElement | null;
 }) {
+  const id = useId();
   return (
-    <div role="radiogroup" aria-label={label} className={cn('grid gap-2', columns && 'sm:grid-cols-2')}>
-      {options.map((o) => {
-        const on = o.id === value;
-        return (
-          <button
-            key={o.id}
-            type="button"
-            role="radio"
-            aria-checked={on}
-            onClick={() => onChange(o.id)}
-            className={cn(
-              'flex flex-col items-start gap-0.5 rounded-2xl px-4 py-3 text-left outline-none transition-colors',
-              'focus-visible:ring-2 focus-visible:ring-ring/60',
-              on ? 'bg-popover ring-2 ring-brand-3' : 'bg-card ring-1 ring-border hover:ring-foreground/25',
-            )}
-          >
-            <span className="text-[14px] font-medium">{o.title}</span>
-            {o.detail && (
-              <span className="text-[12px] leading-snug text-muted-foreground">{o.detail}</span>
-            )}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-/** A small either/or, as a pill. */
-function Segmented<T extends string>({
-  label,
-  value,
-  options,
-  onChange,
-}: {
-  label: string;
-  value: T;
-  options: { id: T; label: string; icon?: ReactNode }[];
-  onChange: (id: T) => void;
-}) {
-  return (
-    <div role="radiogroup" aria-label={label} className="grid auto-cols-fr grid-flow-col rounded-full bg-secondary p-1">
-      {options.map((o) => (
-        <button
-          key={o.id}
-          type="button"
-          role="radio"
-          aria-checked={o.id === value}
-          onClick={() => onChange(o.id)}
-          className={cn(
-            'flex h-8 items-center justify-center gap-1.5 rounded-full text-[13px] outline-none transition-colors',
-            'focus-visible:ring-2 focus-visible:ring-ring/60 [&_svg]:size-3.5',
-            o.id === value ? 'bg-popover text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
-          )}
+    <div className="settings-field">
+      <label htmlFor={id}>{label}</label>
+      <Select value={value} onValueChange={(next) => onChange(next as T)}>
+        <SelectTrigger id={id} aria-describedby={`${id}-hint`} className="settings-select-trigger">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent
+          container={container}
+          collisionBoundary={container}
+          collisionPadding={12}
+          sideOffset={6}
+          className="settings-select-content"
         >
-          {o.icon}
-          {o.label}
-        </button>
-      ))}
+          {options.map((option) => <SelectItem key={option.id} value={option.id}>{option.label}</SelectItem>)}
+        </SelectContent>
+      </Select>
+      <p id={`${id}-hint`} className="settings-hint">{hint}</p>
     </div>
   );
 }
 
-/**
- * Everything you set once: the engine, the key, how Reimagine thinks, the
- * experiments. A native modal, so focus, Escape and the backdrop come free.
- */
+function Disclosure({ title, summary, children, open }: {
+  title: string;
+  summary: string;
+  children: ReactNode;
+  open?: boolean;
+}) {
+  return (
+    <details className="settings-disclosure" open={open}>
+      <summary>
+        <span><span className="settings-label">{title}</span><span className="settings-hint">{summary}</span></span>
+        <ChevronDown size={17} aria-hidden="true" />
+      </summary>
+      <div className="settings-disclosure-content">{children}</div>
+    </details>
+  );
+}
+
+/** Everyday choices first; connection and model details stay out of the way. */
 export function Settings({
-  open,
-  onClose,
-  backend,
-  onBackendChange,
-  apiKey,
-  demo,
-  onConnectKey,
-  onRemoveKey,
-  plannerConfig,
-  onPlannerConfigChange,
-  plannerModel,
-  onPlannerModelChange,
-  abTest,
-  onAbTestChange,
-  datasetCount,
-  onExportDataset,
-  theme,
-  onThemeChange,
-  connected,
-  onDisconnect,
+  open, onClose, backend, onBackendChange, apiKey, demo, onConnectKey, onRemoveKey,
+  plannerConfig, onPlannerConfigChange, plannerModel, onPlannerModelChange,
+  abTest, onAbTestChange, follow, onFollowChange, datasetCount, onExportDataset,
+  theme, onThemeChange, connected, onDisconnect,
 }: Props) {
-  const ref = useRef<HTMLDialogElement>(null);
+  const [dialog, setDialog] = useState<HTMLDialogElement | null>(null);
+  const titleId = useId();
   useEffect(() => {
-    const dialog = ref.current;
     if (open && !dialog?.open) dialog?.showModal();
     if (!open && dialog?.open) dialog.close();
-  }, [open]);
+  }, [open, dialog]);
 
   return (
     <dialog
-      ref={ref}
-      aria-label="Settings"
+      ref={setDialog}
+      aria-labelledby={titleId}
       onClose={onClose}
-      // The dialog box is fully covered by its content, so a click that lands
-      // on the dialog element itself came through the backdrop.
       onClick={(e) => e.target === e.currentTarget && onClose()}
-      className="m-auto max-h-[min(46rem,calc(100dvh-1.5rem))] w-[min(36rem,calc(100vw-1.5rem))] overflow-hidden rounded-[1.75rem] bg-popover p-0 text-popover-foreground shadow-2xl ring-1 ring-border"
+      className="settings-dialog shadow-2xl"
     >
-      <div className="flex max-h-[inherit] flex-col">
-        <header className="flex items-center gap-3 px-6 pt-5 pb-3">
-          {/* Takes the opening focus, so the close button doesn't greet you with a ring. */}
-          <h2 tabIndex={-1} autoFocus className="font-display text-xl font-semibold tracking-[-0.02em] outline-none">
-            Settings
-          </h2>
-          <div className="flex-1" />
-          <button
-            type="button"
-            aria-label="Close settings"
-            onClick={onClose}
-            className="grid size-8 place-items-center rounded-full text-muted-foreground outline-none hover:bg-secondary hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
-          >
-            <X className="size-4" />
+      <div className="settings-shell">
+        <header className="settings-header">
+          <h2 id={titleId} tabIndex={-1} autoFocus>Settings</h2>
+          <button type="button" aria-label="Close settings" onClick={onClose} className="settings-close">
+            <X size={18} aria-hidden="true" />
           </button>
         </header>
 
-        <div className="scrollbar-thin flex flex-col gap-8 overflow-y-auto px-6 pt-2 pb-6">
-          <Group title="Music engine" hint="Which model plays the band. Switching reconnects.">
-            <Choice
-              label="Music engine"
-              value={backend}
-              columns
-              options={ENGINES.map((e) => ({ id: e.id, title: e.name, detail: e.blurb }))}
-              onChange={onBackendChange}
-            />
-            {backend === 'magenta' && (
-              <a
-                href={BRIDGE_HELP}
-                target="_blank"
-                rel="noreferrer"
-                className="text-[13px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
-              >
-                How to run the Magenta bridge
-              </a>
-            )}
-          </Group>
-
-          <Group
-            title="Gemini API key"
-            hint="Lyria and Reimagine both use it. It's saved only in this browser and only ever sent to Google."
-          >
-            {apiKey ? (
-              <div className="flex items-center gap-2 rounded-2xl bg-card py-2 pr-2 pl-4">
-                <span className="min-w-0 flex-1 text-[14px]">
-                  Connected{' '}
-                  <span className="text-muted-foreground">· key ending in {apiKey.slice(-4)}</span>
-                </span>
-                <Button size="sm" variant="ghost" onClick={onConnectKey}>
-                  Change
-                </Button>
-                <Button size="sm" variant="destructive" onClick={onRemoveKey}>
-                  Remove
-                </Button>
+        <div className="settings-body scrollbar-thin">
+          <section className="settings-section" aria-label="Drawing and music">
+            <div className="settings-row">
+              <div>
+                <h3>Follow my drawing</h3>
+                <p className="settings-hint">Let the music pick up new details as you draw.</p>
               </div>
-            ) : demo ? (
-              <div className="flex items-center gap-3 rounded-2xl bg-card py-2.5 pr-2 pl-4">
-                <span className="min-w-0 flex-1 text-[13px] leading-snug text-muted-foreground">
-                  <span className="text-[14px] text-foreground">Using skuzic's shared key.</span> Everyone
-                  shares it, so it can get busy. Your own free key fixes slow starts and gaps.
-                </span>
-                <Button size="sm" onClick={onConnectKey}>
-                  Use my own
-                </Button>
-              </div>
-            ) : (
-              <Button className="self-start" onClick={onConnectKey}>
-                Connect your Gemini key
-              </Button>
-            )}
-          </Group>
-
-          <Group
-            title="Reimagine"
-            hint="What Gemini does when you tap Reimagine or ask the band for a change."
-          >
-            <Choice
-              label="Reimagine approach"
+              <Switch on={follow} onChange={onFollowChange} label="Follow my drawing" />
+            </div>
+            {!follow && <p className="settings-hint">Automatic refinements are off. Use Reimagine whenever you like.</p>}
+            <SettingSelect
+              container={dialog}
+              label="How the music changes"
               value={plannerConfig}
-              options={PLANNER_CONFIG_LIST.map((c) => ({ id: c.id, title: c.label, detail: c.description }))}
+              options={PLANNER_CONFIG_LIST.map((c) => ({ id: c.id, label: c.label }))}
+              hint={RESPONSE_HINTS[plannerConfig]}
               onChange={onPlannerConfigChange}
             />
-            <div className="flex items-center justify-between gap-4 pt-1">
-              <span className="text-[13px] text-muted-foreground">
-                {PLANNER_MODELS.find((m) => m.id === plannerModel)?.detail}
-              </span>
-              <div className="w-48">
-                <Segmented
-                  label="Gemini model"
-                  value={plannerModel}
-                  options={PLANNER_MODELS.map((m) => ({ id: m.id, label: m.label }))}
-                  onChange={onPlannerModelChange}
-                />
-              </div>
-            </div>
-          </Group>
+          </section>
 
-          <Group title="Experiments">
-            <div className="flex items-start gap-4 rounded-2xl bg-card px-4 py-3">
-              <div className="min-w-0 flex-1">
-                <p className="text-[14px] font-medium">Compare two versions</p>
-                <p className="text-[12px] leading-snug text-muted-foreground">
-                  Reimagine makes two mixes and you keep the one you like. Your picks are saved in
-                  this browser to help tune skuzic.
-                </p>
-              </div>
-              <Switch on={abTest} onChange={onAbTestChange} label="Compare two versions" />
+          <section className="settings-section">
+            <Appearance value={theme} onChange={onThemeChange} />
+          </section>
+
+          <Disclosure
+            title="Connection"
+            summary={apiKey ? 'Using your Gemini key' : demo ? 'Using the skuzic demo' : 'Add a Gemini key to connect'}
+            open={!apiKey && !demo ? true : undefined}
+          >
+            <div>
+              <p className="settings-label">Gemini API key</p>
+              <p className="settings-hint">For music and Reimagine. Your key is saved in this browser.</p>
             </div>
-            {datasetCount > 0 && (
-              <div className="flex items-center justify-between px-1 text-[13px] text-muted-foreground">
-                <span>
-                  {datasetCount} pick{datasetCount === 1 ? '' : 's'} saved
-                </span>
-                <Button size="sm" variant="ghost" onClick={onExportDataset}>
-                  Export
-                </Button>
+            {apiKey ? (
+              <div className="settings-key">
+                <span className="settings-hint">Key ending in <span className="settings-key-suffix">{apiKey.slice(-4)}</span></span>
+                <div className="settings-actions">
+                  <Button size="sm" variant="secondary" onClick={onConnectKey}>Change key</Button>
+                  <Button size="sm" variant="ghost" onClick={onRemoveKey}>Remove key</Button>
+                </div>
+              </div>
+            ) : (
+              <div className="settings-key">
+                {demo && <p className="settings-hint">The demo connection is shared. Add your own key if it gets busy.</p>}
+                <Button size="sm" variant="secondary" onClick={onConnectKey}>Add your key</Button>
               </div>
             )}
-          </Group>
+            {connected && (
+              <div className="settings-session">
+                <p className="settings-hint">End the current music session.</p>
+                <Button size="sm" variant="ghost" onClick={onDisconnect}>Stop music</Button>
+              </div>
+            )}
+          </Disclosure>
 
-          <Group title="Appearance">
-            <Segmented
-              label="Theme"
-              value={theme}
-              options={[
-                { id: 'system', label: 'System', icon: <Monitor /> },
-                { id: 'light', label: 'Light', icon: <Sun /> },
-                { id: 'dark', label: 'Dark', icon: <Moon /> },
-              ]}
-              onChange={onThemeChange}
+          <Disclosure title="Advanced" summary="Models and experiments">
+            <SettingSelect
+              container={dialog}
+              label="Music engine"
+              value={backend}
+              options={[{ id: 'lyria', label: 'Lyria RealTime' }, { id: 'magenta', label: 'Magenta RT' }]}
+              hint={backend === 'lyria'
+                ? 'Streams music from Google. Switching engines reconnects the music.'
+                : 'Runs on your Mac with the local bridge. Switching engines reconnects the music.'}
+              onChange={onBackendChange}
             />
-          </Group>
-
-          {connected && (
-            <Button variant="ghost" className="self-start" onClick={onDisconnect}>
-              Stop the band
-            </Button>
-          )}
+            {backend === 'magenta' && <a className="settings-link" href={BRIDGE_HELP} target="_blank" rel="noreferrer">Set up the Magenta bridge ↗</a>}
+            <SettingSelect
+              container={dialog}
+              label="Drawing model"
+              value={plannerModel}
+              options={PLANNER_MODELS.map((m) => ({ id: m.id, label: `${m.label} · ${m.detail}` }))}
+              hint="Reads your picture for Follow my drawing and Reimagine."
+              onChange={onPlannerModelChange}
+            />
+            <div className="settings-experiment">
+              <div className="settings-row">
+                <div>
+                  <h3>Compare two mixes</h3>
+                  <p className="settings-hint">Reimagine makes two versions. Pick your favorite.</p>
+                </div>
+                <Switch on={abTest} onChange={onAbTestChange} label="Compare two mixes" />
+              </div>
+              <div className="settings-export">
+                <p className="settings-hint">
+                  {datasetCount > 0 ? `${datasetCount} pick${datasetCount === 1 ? '' : 's'} saved in this browser.` : 'Your picks stay in this browser.'}
+                </p>
+                {datasetCount > 0 && <Button size="sm" variant="ghost" onClick={onExportDataset}>Export picks</Button>}
+              </div>
+            </div>
+          </Disclosure>
         </div>
+
+        <footer className="settings-footer">
+          <p className="settings-hint">Changes save automatically.</p>
+          <Button variant="default" onClick={onClose}>Done</Button>
+        </footer>
       </div>
     </dialog>
   );

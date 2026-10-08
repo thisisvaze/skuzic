@@ -3,12 +3,20 @@
  * Lyria bed answers in seconds, and designed to be lived with for a session.
  *
  * Two layers. The paper: a quiet, unpitched friction texture under every
- * stroke, felt more than heard, whose grain speeds up with the pen. The piano:
- * soft notes from a real grand (public/sounds, built by
- * scripts/make-pen-sounds.py), played sparingly and voice-led into a slow
- * melody in F major pentatonic, which is also D minor pentatonic. Leaving out
- * B♭ and E drops both half steps from the key, so the line stays consonant over
- * whatever chord the bed happens to be on.
+ * stroke, felt more than heard, whose grain speeds up with the pen. The notes:
+ * voice-led into a slow melody in F major pentatonic, which is also D minor
+ * pentatonic. Leaving out B♭ and E drops both half steps from the key, so the
+ * line stays consonant over whatever chord the bed happens to be on.
+ *
+ * Each brush has its own voice, and neither is an instrument the bed plays, so
+ * the pen never competes with the music:
+ * - Pencil plucks: a soft synthesized wooden note, gone in about half a second.
+ *   A sharp corner can pluck too, so a zigzag plays and a long smooth line
+ *   stays quiet, and every touchdown ticks, so even a dot is heard.
+ * - Watercolor swells: no attacks, just a soft two-note chord that rises with
+ *   how much paint is flowing and lingers after the brush lifts.
+ * - Piano, the earlier voice, kept in Settings to compare: soft notes from a
+ *   real grand (public/sounds, built by scripts/make-pen-sounds.py) for every brush.
  *
  * What keeps it pleasant for twenty minutes:
  * - Phrases: a few notes, then a breath, the last one landing on F, A or C so
@@ -28,6 +36,8 @@
  * scale picker stays in the Engine menu, transpose NOTES from state.config.scale.
  */
 
+import { KEYS, load } from '../lib/persist';
+
 /** Semitones above F: F G A C D. */
 const PENTATONIC = [0, 2, 4, 7, 9];
 
@@ -42,7 +52,14 @@ const TOP = NOTES.length - 1;
 const PIANO_ROOTS = [66, 68, 72, 75, 78, 81, 84, 87];
 const SOUNDS = `${import.meta.env.BASE_URL}sounds/`;
 
-export type PenTool = 'pencil' | 'marker' | 'eraser';
+export type PenTool = 'pencil' | 'marker' | 'watercolor' | 'eraser';
+/** A voice for each brush, or the piano for all of them. */
+export type PenVoice = 'brushes' | 'piano';
+
+/** The voice picked in Settings, read on every stroke so a change is heard on the next one. */
+export const penVoice = (): PenVoice => load<PenVoice>(KEYS.penVoice, 'brushes');
+
+const hz = (midi: number) => 440 * 2 ** ((midi - 69) / 12);
 
 /** Pen speed, in CSS px per second, that drives the paper to full level. */
 const FULL_SPEED = 1400;
@@ -81,8 +98,38 @@ const PAPER_TONE: Record<PenTool, { rate: number; lowpass: number; buffer: 'roug
   // Kept dark: the top octave of paper noise is hiss, and hiss is what tires.
   pencil: { rate: 1, lowpass: 4200, buffer: 'rough' },
   marker: { rate: 0.85, lowpass: 2400, buffer: 'smooth' },
+  watercolor: { rate: 0.85, lowpass: 2400, buffer: 'smooth' },
   eraser: { rate: 0.55, lowpass: 1300, buffer: 'smooth' },
 };
+
+/**
+ * The pencil's pluck: a sine and two overtones, each as ratio to the note,
+ * level, and decay relative to the note's. Two octaves up is a marimba bar's
+ * woody partial; 6.27 is a kalimba tine's glint, gone almost at once.
+ */
+const PLUCK = [
+  { ratio: 1, level: 1, decay: 1 },
+  { ratio: 4, level: 0.16, decay: 0.2 },
+  { ratio: 6.27, level: 0.05, decay: 0.08 },
+];
+/** The pluck's decay time constant at A4, in seconds; higher notes ring shorter. */
+const PLUCK_DECAY = 0.2;
+/** Matches a soft piano note's A-weighted loudness at the same velocity, measured on the samples. */
+const PLUCK_LEVEL = 0.3;
+/** The touchdown tick, kept well under the notes. */
+const TICK = 0.1;
+
+/** The watercolor chord at full flow, about 2 dB under a typical pencil note. */
+const SWELL = 0.08;
+/** How slowly a lifted brush's chord fades (a time constant, in seconds), like paint still spreading. */
+const SWELL_RELEASE = 0.6;
+/** The chord steps along the scale at most this often as the brush travels up or down. */
+const SWELL_STEP_MS = 600;
+
+/** Pen travel, in CSS px, over which a direction is measured, so a shaky hand isn't a corner. */
+const SEGMENT = 12;
+/** A turn sharper than this, in radians (about 70°), is a corner. */
+const CORNER = 1.2;
 
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
 
@@ -280,7 +327,7 @@ export class TouchEngine {
       );
   }
 
-  /** The bed's current level, 0..1, so the pen can make room when the band is loud. */
+  /** The bed's current level, 0..1, so the pen can make room when the music is loud. */
   listen(meter: () => number): void {
     this.meter = meter;
   }
@@ -393,23 +440,6 @@ export class TouchEngine {
     ) {
       this.sing(this.aim(last.y), 0.4, t, 0.75);
     }
-  }
-
-  /** The eyes heard a new scene: a soft three-note answer, rising for bright scenes. */
-  cue(bright = true): void {
-    if (this.ctx.state === 'closed') return;
-    this.attention = Math.min(1, this.attention + 0.25);
-    const from = this.melody ?? 4;
-    const base = bright ? Math.min(from, TOP - 4) : Math.max(from, 4);
-    const now = this.ctx.currentTime;
-    [0, 2, 4].forEach((step, i) => {
-      const index = bright ? base + step : base - step;
-      this.play(NOTES[index], 0.42 + 0.06 * i, now + 0.02 + i * 0.14, this.panAt(this.size.width / 2));
-    });
-    this.melody = bright ? base + 4 : base - 4;
-    this.lastNote = performance.now();
-    // Leave the answer some air before the pen's own next phrase.
-    this.phrase = { left: 0, breathUntil: this.lastNote + 1500 };
   }
 
   /** The page was cleared: a soft swish, and the next stroke starts a fresh phrase. */

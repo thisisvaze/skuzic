@@ -6,17 +6,22 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { AudioLines, Droplet, Eraser, Play, Redo2, Trash2, Undo2 } from 'lucide-react';
+import { Brush, Eraser, Pencil, Play, Redo2, Trash2, Undo2, Volume2, VolumeOff } from 'lucide-react';
 import getStroke from 'perfect-freehand';
-import { TouchEngine, prefetchPenSounds } from '@/audio/touch';
+import * as SliderPrimitive from '@radix-ui/react-slider';
+import { TouchEngine } from '@/audio/touch';
 import { Button } from '@/components/ui/button';
-import { Slider } from '@/components/ui/slider';
 import { cn } from '@/lib/utils';
 import { KEYS, load, save } from '@/lib/persist';
+import { Stamper, glaze, paperPits, tooth, type Medium } from './brushes';
+import { InkPicker } from './InkPicker';
+import type { Box, Mark } from '@/vision/eyes';
 
 /** Longest edge sent to the planner. Above ~640px the extra detail is wasted. */
 const EXPORT_MAX_EDGE = 640;
 const EXPORT_QUALITY = 0.8;
+/** SigLIP's input size: a figure's crop is made at it so nothing is resampled twice. */
+const CROP_EDGE = 224;
 
 const PAPER = '#fcfbf8';
 
@@ -53,7 +58,7 @@ const OPACITY_MIN = 0.1;
  * is what makes a stroke read as drawn rather than plotted. Tuned for
  * sketching: quick strokes taper, slow ones press dark.
  */
-const PENCIL = {
+export const PENCIL = {
   size: 5,
   thinning: 0.62,
   smoothing: 0.5,
@@ -76,7 +81,7 @@ const GRAIN_TILE = 256;
  *  still reads as a continuous line once the planner downsamples it to 640px. */
 const GRAIN_FLOOR = 0.42;
 /** Below 1 so overlapping passes build up, the way graphite actually darkens. */
-const INK_ALPHA = 0.88;
+export const INK_ALPHA = 0.88;
 
 /** From this nib size up, the paper sounds like a marker rather than a pencil. */
 const MARKER_SIZE = 14;
@@ -94,16 +99,68 @@ const TOOL_CELL =
 const TOOL_ON = 'bg-accent text-foreground';
 const TOOL_OFF = 'text-muted-foreground hover:bg-secondary hover:text-foreground';
 
+/**
+ * The iPad rail's slider: a slim upright track that fills from the bottom, with
+ * a thumb that shows what the setting does rather than a bare knob.
+ */
+function RailSlider({
+  label,
+  title,
+  value,
+  min,
+  max,
+  onChange,
+  children,
+}: {
+  label: string;
+  title: string;
+  value: number;
+  min: number;
+  max: number;
+  onChange: (value: number) => void;
+  children: ReactNode;
+}) {
+  const pct = (value - min) / (max - min);
+  return (
+    <SliderPrimitive.Root
+      orientation="vertical"
+      value={[value]}
+      min={min}
+      max={max}
+      step={1}
+      title={title}
+      onValueChange={([v]) => onChange(v)}
+      className="relative flex h-36 w-5 cursor-ns-resize touch-none flex-col items-center rounded-full select-none has-focus-visible:ring-2 has-focus-visible:ring-ring/60"
+    >
+      <SliderPrimitive.Track className="relative w-full grow overflow-hidden rounded-full bg-muted">
+        {/* Drawn here instead of by Radix's Range so the fill always reaches the
+            thumb's top: the thumb sits on the fill at every value, even zero. */}
+        <span
+          className="absolute inset-x-0 bottom-0 rounded-full bg-foreground/80"
+          style={{ height: `calc(1.25rem + (100% - 1.25rem) * ${pct})` }}
+        />
+      </SliderPrimitive.Track>
+      <SliderPrimitive.Thumb aria-label={label} className="grid size-5 place-items-center rounded-full outline-none">
+        {children}
+      </SliderPrimitive.Thumb>
+    </SliderPrimitive.Root>
+  );
+}
+
 const MOD =
   typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl+';
 
 interface Stroke {
+  /** Unique for the page's life, so the eyes can tell which strokes they have read. */
+  id: number;
   /** [x, y, pressure] — the shape perfect-freehand consumes directly. */
   points: number[][];
   color: string;
+  /** Pencil or watercolor; the eraser ignores it. */
+  medium: Medium;
   size: number;
-  /** 0-1 nib opacity, multiplied into INK_ALPHA. Per stroke, so replaying the
-   *  history after an undo keeps each mark as light as it was drawn. */
+  /** 0-1 opacity the stroke is laid at. Per stroke, so replaying the history
+   *  after an undo keeps each mark as light as it was drawn. */
   alpha: number;
   erasing: boolean;
   /**
@@ -115,7 +172,7 @@ interface Stroke {
 }
 
 /** Cheap deterministic PRNG — grain must not shimmer when history repaints. */
-function seeded(seed: number) {
+export function seeded(seed: number) {
   let s = seed >>> 0;
   return () => {
     s = (s * 1664525 + 1013904223) >>> 0;
@@ -152,7 +209,7 @@ function octave(cells: number, seed: number) {
 }
 
 /** A grayscale tooth in the alpha channel: 255 lets ink through, 0 blocks it. */
-function makeGrainTile(): HTMLCanvasElement {
+export function makeGrainTile(): HTMLCanvasElement {
   const tile = document.createElement('canvas');
   tile.width = GRAIN_TILE;
   tile.height = GRAIN_TILE;
@@ -177,7 +234,7 @@ function makeGrainTile(): HTMLCanvasElement {
 }
 
 /** perfect-freehand returns an outline; stitch it with mid-point quadratics. */
-function outlinePath(outline: number[][]): Path2D {
+export function outlinePath(outline: number[][]): Path2D {
   const path = new Path2D();
   if (!outline.length) return path;
   path.moveTo(outline[0][0], outline[0][1]);
@@ -206,22 +263,26 @@ function hasInkIn(entries: Entry[]): boolean {
 
 export interface CanvasHandle {
   toDataURL: () => string;
+  /** The strokes since the last clear, in drawing order, for the eyes to group. */
+  marks: () => Mark[];
+  /** The page's size in the same pixels as the marks. */
+  size: () => { width: number; height: number };
+  /** A square of the page around a figure, as the eyes read it. */
+  crop: (box: Box) => string;
   clear: () => void;
   isEmpty: () => boolean;
   undo: () => void;
   redo: () => void;
-  /** The music changed scene: the pen answers right away, before the band follows. */
-  cue: (bright?: boolean) => void;
 }
 
 interface Props {
   /**
-   * Fired when the pad changes on its own (stroke finished, undo, redo) while
-   * auto-interpret is on. The parent reads the page with SigLIP and collapses a
-   * burst of strokes into one read.
+   * Fired when the pad changes on its own (stroke finished, undo, redo). The
+   * parent reads the page with SigLIP and collapses a burst of strokes into one
+   * read.
    */
   onAutoInterpret?: () => void;
-  /** Fired when the page is wiped from the toolbar, whether or not the music follows the drawing. */
+  /** Fired when the page is wiped from the toolbar. */
   onClear?: () => void;
   /** Shown along the bottom of the blank page, under the hint. Only its own controls take clicks. */
   emptyState?: ReactNode;
@@ -230,7 +291,6 @@ interface Props {
   playing?: boolean;
   /** Live spectrum the glow follows. */
   getLevels?: (bands: number) => number[] | null;
-  autoInterpret?: boolean;
   /** Idle gate — fades the pad and shows a centered start control. */
   showStart?: boolean;
   onStart?: () => void;
@@ -250,7 +310,6 @@ export const DrawCanvas = forwardRef<CanvasHandle, Props>(function DrawCanvas(
     interpretDisabled,
     playing,
     getLevels,
-    autoInterpret,
     showStart,
     onStart,
     startDisabled,
@@ -267,6 +326,10 @@ export const DrawCanvas = forwardRef<CanvasHandle, Props>(function DrawCanvas(
     save(KEYS.inkColor, color);
   }, [color]);
   const [erasing, setErasing] = useState(false);
+  const [medium, setMedium] = useState<Medium>(() => load(KEYS.medium, 'pencil'));
+  useEffect(() => {
+    save(KEYS.medium, medium);
+  }, [medium]);
   const [brushSize, setBrushSize] = useState(() => load(KEYS.brushSize, PENCIL.size));
   useEffect(() => {
     save(KEYS.brushSize, brushSize);
@@ -278,19 +341,9 @@ export const DrawCanvas = forwardRef<CanvasHandle, Props>(function DrawCanvas(
 
   /** The pen's own sound. Built on the first stroke, inside that gesture, so the browser lets it play. */
   const touch = useRef<TouchEngine | null>(null);
-  // The piano downloads while the page settles, so the first stroke can already sing.
-  useEffect(() => {
-    prefetchPenSounds().catch(() => {});
-  }, []);
-  // Read through a ref: the engine outlives renders and should always hear the current band.
+  // Read through a ref: the engine outlives renders and should always hear the current music.
   const levelsRef = useRef(getLevels);
   levelsRef.current = getLevels;
-  const [paperSound, setPaperSound] = useState(() => load(KEYS.paperSound, true));
-  useEffect(() => {
-    save(KEYS.paperSound, paperSound);
-    // Switching off mid-stroke lets that stroke ring out instead of carrying on.
-    if (!paperSound) touch.current?.up();
-  }, [paperSound]);
   // Nulled as well as closed: StrictMode remounts, and a closed context can't be reused.
   useEffect(
     () => () => {
@@ -299,13 +352,28 @@ export const DrawCanvas = forwardRef<CanvasHandle, Props>(function DrawCanvas(
     },
     [],
   );
+  const [sound, setSound] = useState(() => load(KEYS.brushSound, true));
+  useEffect(() => {
+    save(KEYS.brushSound, sound);
+    // Off is silent at once, notes in flight included; the next stroke after on builds it again.
+    if (!sound) {
+      touch.current?.close();
+      touch.current = null;
+    }
+  }, [sound]);
 
   const past = useRef<Entry[]>([]);
   const future = useRef<Entry[]>([]);
   const stroke = useRef<Stroke | null>(null);
+  const nextId = useRef(0);
   const baseRef = useRef<HTMLCanvasElement | null>(null);
   const scratchRef = useRef<HTMLCanvasElement | null>(null);
-  const grainRef = useRef<CanvasPattern | null>(null);
+  /** The stroke being drawn, stamped but not yet through the paper's tooth (scratch holds it after). */
+  const liveRef = useRef<HTMLCanvasElement | null>(null);
+  const stamper = useRef<Stamper | null>(null);
+  /** The paper's hollows, made once, as a tile and as a pattern on the scratch layer. */
+  const pitsTile = useRef<HTMLCanvasElement | null>(null);
+  const pitsRef = useRef<CanvasPattern | null>(null);
   const dprRef = useRef(1);
   const [depth, setDepth] = useState({ undo: 0, redo: 0 });
 
@@ -317,89 +385,49 @@ export const DrawCanvas = forwardRef<CanvasHandle, Props>(function DrawCanvas(
     ctx.fillRect(0, 0, canvas.width, canvas.height);
   };
 
-  const paintStroke = (ctx: CanvasRenderingContext2D, s: Stroke) => {
+  /** The eraser: a blunt band of paper, no taper, so it lifts a predictable width. */
+  const paintEraser = (ctx: CanvasRenderingContext2D, s: Stroke) => {
     if (!s.points.length) return;
+    ctx.fillStyle = PAPER;
+    ctx.fill(outlinePath(getStroke(s.points, { ...PENCIL, size: s.size, simulatePressure: s.simulate, thinning: 0 })));
+  };
 
-    const outline = getStroke(s.points, {
-      ...PENCIL,
-      size: s.size,
-      simulatePressure: s.simulate,
-      // The eraser is a blunt tool: no taper, so it lifts a predictable band.
-      thinning: s.erasing ? 0 : PENCIL.thinning,
-    });
-
-    const path = outlinePath(outline);
-
-    // The eraser lifts everything, tooth included.
-    if (s.erasing) {
-      ctx.fillStyle = PAPER;
-      ctx.fill(path);
-      return;
+  /** Clears the stroke layers for a new stroke. */
+  const freshLayers = () => {
+    for (const c of [liveRef.current, scratchRef.current]) {
+      const ctx = c?.getContext('2d');
+      if (!c || !ctx) continue;
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, c.width, c.height);
+      ctx.restore();
     }
+  };
 
-    const scratch = scratchRef.current;
-    const sctx = scratch?.getContext('2d');
-    const grain = grainRef.current;
-    if (!scratch || !sctx || !grain) {
-      ctx.globalAlpha = INK_ALPHA * s.alpha;
-      ctx.fillStyle = s.color;
-      ctx.fill(path);
-      ctx.globalAlpha = 1;
-      return;
-    }
+  /** Stamps more of a pencil or watercolor stroke (or finishes it), and puts what changed through the paper's tooth. */
+  const stampMore = (s: Stroke, st: Stamper, points: number[][] | null) => {
+    const live = liveRef.current;
+    const out = scratchRef.current;
+    const pits = pitsRef.current;
+    const lctx = live?.getContext('2d');
+    if (!live || !lctx || !out || !pits) return;
+    const changed = points ? st.add(lctx, points) : st.finish(lctx);
+    if (changed) tooth(out, live, changed, s.medium, pits, dprRef.current);
+  };
 
-    // Only touch the stroke's own bounds — masking the full canvas per frame
-    // during a live stroke is what would make this crawl.
-    const dpr = dprRef.current;
-    const w = scratch.width / dpr;
-    const h = scratch.height / dpr;
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-    for (const [x, y] of outline) {
-      if (x < minX) minX = x;
-      if (y < minY) minY = y;
-      if (x > maxX) maxX = x;
-      if (y > maxY) maxY = y;
-    }
-    if (!Number.isFinite(minX)) return;
-
-    const bx = Math.max(0, Math.floor(minX) - 2);
-    const by = Math.max(0, Math.floor(minY) - 2);
-    const bw = Math.min(w, Math.ceil(maxX) + 2) - bx;
-    const bh = Math.min(h, Math.ceil(maxY) + 2) - by;
-    if (bw <= 0 || bh <= 0) return;
-
-    // The clip is load-bearing, not tidiness: destination-in is defined over
-    // the whole surface, so without it every frame of a live stroke would mask
-    // the entire canvas and the bounds above would buy nothing.
-    sctx.save();
-    sctx.beginPath();
-    sctx.rect(bx, by, bw, bh);
-    sctx.clip();
-
-    sctx.clearRect(bx, by, bw, bh);
-    sctx.fillStyle = s.color;
-    sctx.fill(path);
-    // Punch the paper tooth out of the stroke. The pattern is filled in canvas
-    // coordinates, which is what keeps it locked to the sheet.
-    sctx.globalCompositeOperation = 'destination-in';
-    sctx.fillStyle = grain;
-    sctx.fillRect(bx, by, bw, bh);
-    sctx.globalCompositeOperation = 'source-over';
-    sctx.restore();
-
-    ctx.globalAlpha = INK_ALPHA * s.alpha;
-    ctx.drawImage(scratch, bx * dpr, by * dpr, bw * dpr, bh * dpr, bx, by, bw, bh);
-    ctx.globalAlpha = 1;
+  /** A finished stroke, stamped again from its points: what undo, redo and a resize replay. */
+  const paintMarks = (ctx: CanvasRenderingContext2D, s: Stroke) => {
+    freshLayers();
+    const st = new Stamper(s.medium, s.size, s.color, s.id, s.simulate);
+    stampMore(s, st, s.points);
+    stampMore(s, st, null);
+    if (scratchRef.current) glaze(ctx, scratchRef.current, st.bounds, s.alpha, dprRef.current);
   };
 
   /**
-   * Committed strokes live on an offscreen copy. A perfect-freehand outline
-   * changes shape as points arrive, so the in-progress stroke has to be redrawn
-   * every frame — blitting the buffer keeps that cost flat instead of replaying
-   * the whole drawing on each pointer move.
+   * Committed strokes live on an offscreen copy, and the stroke in progress is
+   * stamped as its points arrive, so a frame is one blit of each instead of a
+   * replay of the whole drawing.
    */
   const redrawBase = () => {
     const base = baseRef.current;
@@ -409,7 +437,15 @@ export const DrawCanvas = forwardRef<CanvasHandle, Props>(function DrawCanvas(
     ctx.fillRect(0, 0, base.width, base.height);
     for (const entry of past.current) {
       if (entry.kind === 'clear') ctx.fillRect(0, 0, base.width, base.height);
-      else paintStroke(ctx, entry.stroke);
+      else if (entry.stroke.erasing) paintEraser(ctx, entry.stroke);
+      else paintMarks(ctx, entry.stroke);
+    }
+    // The replay borrowed the stroke layers: put a stroke in progress back on them.
+    const s = stroke.current;
+    if (s && !s.erasing) {
+      freshLayers();
+      stamper.current = new Stamper(s.medium, s.size, s.color, s.id, s.simulate);
+      stampMore(s, stamper.current, s.points);
     }
   };
 
@@ -422,7 +458,9 @@ export const DrawCanvas = forwardRef<CanvasHandle, Props>(function DrawCanvas(
     const dpr = dprRef.current;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(base, 0, 0, base.width / dpr, base.height / dpr);
-    if (stroke.current) paintStroke(ctx, stroke.current);
+    const s = stroke.current;
+    if (s?.erasing) paintEraser(ctx, s);
+    else if (s && stamper.current && scratchRef.current) glaze(ctx, scratchRef.current, stamper.current.bounds, s.alpha, dpr);
   };
 
   const repaint = () => {
@@ -498,10 +536,16 @@ export const DrawCanvas = forwardRef<CanvasHandle, Props>(function DrawCanvas(
     const scratch = document.createElement('canvas');
     scratch.width = w;
     scratch.height = h;
-    const sctx = scratch.getContext('2d');
-    sctx?.scale(dpr, dpr);
     scratchRef.current = scratch;
-    grainRef.current = sctx?.createPattern(makeGrainTile(), 'repeat') ?? null;
+    pitsTile.current ??= paperPits(makeGrainTile());
+    pitsRef.current = scratch.getContext('2d')?.createPattern(pitsTile.current, 'repeat') ?? null;
+
+    const live = document.createElement('canvas');
+    live.width = w;
+    live.height = h;
+    // Stamps are placed in CSS px.
+    live.getContext('2d')?.scale(dpr, dpr);
+    liveRef.current = live;
 
     fill();
     redrawBase();
@@ -564,11 +608,49 @@ export const DrawCanvas = forwardRef<CanvasHandle, Props>(function DrawCanvas(
       ctx.drawImage(canvas, 0, 0, out.width, out.height);
       return out.toDataURL('image/jpeg', EXPORT_QUALITY);
     },
+    marks: () => {
+      const entries = past.current;
+      const lastClear = entries.map((e) => e.kind).lastIndexOf('clear');
+      return entries
+        .slice(lastClear + 1)
+        .flatMap((e) => (e.kind === 'stroke' ? [{ id: e.stroke.id, color: e.stroke.color, erasing: e.stroke.erasing, points: e.stroke.points }] : []));
+    },
+    size: () => {
+      const canvas = canvasRef.current;
+      const dpr = dprRef.current;
+      return { width: (canvas?.width ?? 0) / dpr, height: (canvas?.height ?? 0) / dpr };
+    },
+    crop: (box) => {
+      const base = baseRef.current;
+      const out = document.createElement('canvas');
+      out.width = out.height = CROP_EDGE;
+      const ctx = out.getContext('2d');
+      if (!base || !ctx) return '';
+      // Square around the figure and padded by a fifth, the framing
+      // scripts/embed-palette.py taught the eyes. Past the page's edge the
+      // source is clipped and the paper fill shows instead.
+      const side = Math.max(box.width, box.height) * 1.2 + 24;
+      const dpr = dprRef.current;
+      ctx.fillStyle = PAPER;
+      ctx.fillRect(0, 0, CROP_EDGE, CROP_EDGE);
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(
+        base,
+        (box.x + box.width / 2 - side / 2) * dpr,
+        (box.y + box.height / 2 - side / 2) * dpr,
+        side * dpr,
+        side * dpr,
+        0,
+        0,
+        CROP_EDGE,
+        CROP_EDGE,
+      );
+      return out.toDataURL('image/jpeg', EXPORT_QUALITY);
+    },
     clear: clearPad,
     isEmpty: () => !dirty.current,
     undo,
     redo,
-    cue: (bright) => touch.current?.cue(bright),
   }));
 
   const pos = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -595,14 +677,22 @@ export const DrawCanvas = forwardRef<CanvasHandle, Props>(function DrawCanvas(
     const { x, y, pressure } = pos(e);
     // Recorded as it is drawn so undo can replay the pad without bitmap copies.
     stroke.current = {
+      id: nextId.current++,
       points: [[x, y, pressure]],
       color,
+      medium,
       size: erasing ? brushSize * ERASER_SCALE : brushSize,
       alpha: brushOpacity,
       erasing,
       simulate: e.pointerType !== 'pen',
     };
-    if (paperSound) {
+    if (!erasing) {
+      const s = stroke.current;
+      freshLayers();
+      stamper.current = new Stamper(s.medium, s.size, s.color, s.id, s.simulate);
+      stampMore(s, stamper.current, s.points);
+    }
+    if (sound) {
       if (!touch.current) {
         touch.current = new TouchEngine();
         touch.current.listen(() => {
@@ -611,7 +701,7 @@ export const DrawCanvas = forwardRef<CanvasHandle, Props>(function DrawCanvas(
         });
       }
       const { width, height } = e.currentTarget.getBoundingClientRect();
-      const tool = erasing ? 'eraser' : brushSize >= MARKER_SIZE ? 'marker' : 'pencil';
+      const tool = erasing ? 'eraser' : medium === 'watercolor' || brushSize >= MARKER_SIZE ? 'marker' : 'pencil';
       touch.current.down(x, y, pressure, e.timeStamp, width, height, tool, brushOpacity);
     }
     present();
@@ -626,22 +716,24 @@ export const DrawCanvas = forwardRef<CanvasHandle, Props>(function DrawCanvas(
       : [];
     const samples = raw.length ? raw : [e.nativeEvent];
     const rect = e.currentTarget.getBoundingClientRect();
+    const fresh: number[][] = [];
     for (const sample of samples) {
       const x = sample.clientX - rect.left;
       const y = sample.clientY - rect.top;
       const pressure = sample.pressure || 0.5;
-      stroke.current.points.push([x, y, pressure]);
+      fresh.push([x, y, pressure]);
       // Every coalesced sample, with its own timestamp: speed comes from these.
       touch.current?.move(x, y, pressure, sample.timeStamp);
     }
+    stroke.current.points.push(...fresh);
+    if (stamper.current) stampMore(stroke.current, stamper.current, fresh);
     present();
   };
 
   // A read in flight is deliberately not part of this test. The parent coalesces
   // overlapping reads, so a stroke drawn mid-read still has to register —
   // otherwise the page the user ends on never gets read.
-  const canAutoInterpret = () =>
-    !!autoInterpret && !interpretDisabled && !!onAutoInterpret;
+  const canAutoInterpret = () => !interpretDisabled && !!onAutoInterpret;
 
   const up = () => {
     if (!drawing.current) return;
@@ -653,7 +745,13 @@ export const DrawCanvas = forwardRef<CanvasHandle, Props>(function DrawCanvas(
       commit({ kind: 'stroke', stroke: finished });
       // Fold it into the buffer so the next stroke blits instead of replaying.
       const ctx = baseRef.current?.getContext('2d');
-      if (ctx) paintStroke(ctx, finished);
+      const st = stamper.current;
+      if (ctx && finished.erasing) paintEraser(ctx, finished);
+      else if (ctx && st && scratchRef.current) {
+        stampMore(finished, st, null);
+        glaze(ctx, scratchRef.current, st.bounds, finished.alpha, dprRef.current);
+      }
+      stamper.current = null;
       present();
     }
     if (canAutoInterpret() && dirty.current) onAutoInterpret?.();
@@ -714,8 +812,141 @@ export const DrawCanvas = forwardRef<CanvasHandle, Props>(function DrawCanvas(
   }, [playing, getLevels]);
 
   return (
-    <div className="flex h-full min-h-0 flex-col items-center gap-3">
-      <div className="relative min-h-0 w-full flex-1">
+    <div className="flex h-full min-h-0 gap-3">
+      {/* The iPad's rail: a column at the left with the sliders on top, then the
+          brushes, the colour and the history. It scrolls if the window is too short. */}
+      {!showStart && (
+        <div className="flex max-h-full shrink-0 flex-col items-center gap-2.5 self-center overflow-y-auto overscroll-contain rounded-[1.6rem] bg-glass px-2 py-3 shadow-[0_8px_30px_-12px_rgb(0_0_0/0.25)] ring-1 ring-border backdrop-blur-xl [scrollbar-width:none]">
+          <div className="flex gap-1.5">
+            <RailSlider
+              label="Brush size"
+              title={`Brush ${brushSize}px`}
+              value={brushSize}
+              min={SIZE_MIN}
+              max={SIZE_MAX}
+              onChange={setBrushSize}
+            >
+              <span
+                className="rounded-full bg-background shadow-[0_1px_3px_rgb(0_0_0/0.45)]"
+                style={{
+                  width: Math.max(4, (brushSize / SIZE_MAX) * SIZE_DOT_MAX),
+                  height: Math.max(4, (brushSize / SIZE_MAX) * SIZE_DOT_MAX),
+                }}
+              />
+            </RailSlider>
+            <RailSlider
+              label="Brush opacity"
+              title={`Opacity ${Math.round(brushOpacity * 100)}%`}
+              value={brushOpacity * 100}
+              min={OPACITY_MIN * 100}
+              max={100}
+              onChange={(v) => setBrushOpacity(v / 100)}
+            >
+              <span
+                className="size-4 rounded-full shadow-[0_0_0_1.5px_var(--background),0_1px_3px_rgb(0_0_0/0.45)]"
+                style={{ backgroundColor: `color-mix(in srgb, ${color} ${Math.round(brushOpacity * 100)}%, transparent)` }}
+              />
+            </RailSlider>
+          </div>
+
+          <span className="h-px w-full shrink-0 bg-border" aria-hidden="true" />
+
+          <div className="flex flex-col items-center gap-0.5" role="group" aria-label="Medium">
+            {(['pencil', 'watercolor'] as const).map((m) => {
+              const on = !erasing && medium === m;
+              return (
+                <button
+                  key={m}
+                  type="button"
+                  aria-label={m === 'pencil' ? 'Pencil' : 'Watercolor'}
+                  aria-pressed={on}
+                  title={m === 'pencil' ? 'Pencil' : 'Watercolor'}
+                  onClick={() => {
+                    setMedium(m);
+                    setErasing(false);
+                  }}
+                  className={cn(TOOL_CELL, on ? TOOL_ON : TOOL_OFF)}
+                >
+                  {m === 'pencil' ? <Pencil className="size-4" /> : <Brush className="size-4" />}
+                </button>
+              );
+            })}
+            <button
+              type="button"
+              aria-label="Eraser"
+              aria-pressed={erasing}
+              title="Eraser"
+              onClick={() => setErasing((on) => !on)}
+              className={cn(TOOL_CELL, erasing ? TOOL_ON : TOOL_OFF)}
+            >
+              <Eraser className="size-4" />
+            </button>
+            {/* Never filled like a selected tool, so it can't pass for a fourth brush: the icon carries the state. */}
+            <button
+              type="button"
+              aria-label="Brush sound"
+              aria-pressed={sound}
+              title={sound ? 'Brush sound on' : 'Brush sound off'}
+              onClick={() => setSound((on) => !on)}
+              className={cn(TOOL_CELL, TOOL_OFF)}
+            >
+              {sound ? <Volume2 className="size-4" /> : <VolumeOff className="size-4" />}
+            </button>
+          </div>
+
+          <span className="h-px w-full shrink-0 bg-border" aria-hidden="true" />
+
+          <InkPicker
+            value={color}
+            presets={COLORS}
+            onChange={(c) => {
+              setColor(c);
+              setErasing(false);
+            }}
+          />
+
+          <span className="h-px w-full shrink-0 bg-border" aria-hidden="true" />
+
+          <div className="flex flex-col items-center gap-0.5">
+            <button
+              type="button"
+              aria-label="Undo"
+              title={`Undo (${MOD}Z)`}
+              disabled={!depth.undo}
+              onClick={undo}
+              className={cn(TOOL_CELL, TOOL_OFF, 'disabled:pointer-events-none disabled:opacity-35')}
+            >
+              <Undo2 className="size-4" />
+            </button>
+            <button
+              type="button"
+              aria-label="Redo"
+              title={`Redo (${MOD}⇧Z)`}
+              disabled={!depth.redo}
+              onClick={redo}
+              className={cn(TOOL_CELL, TOOL_OFF, 'disabled:pointer-events-none disabled:opacity-35')}
+            >
+              <Redo2 className="size-4" />
+            </button>
+            <button
+              type="button"
+              aria-label="Clear the page"
+              title="Clear the page"
+              disabled={!hasInk}
+              onClick={clearFromToolbar}
+              className={cn(
+                TOOL_CELL,
+                TOOL_OFF,
+                'hover:text-destructive disabled:pointer-events-none disabled:opacity-35',
+              )}
+            >
+              <Trash2 className="size-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="relative min-h-0 min-w-0 flex-1">
         <div
           ref={glowRef}
           aria-hidden="true"
@@ -770,150 +1001,6 @@ export const DrawCanvas = forwardRef<CanvasHandle, Props>(function DrawCanvas(
           )}
         </div>
       </div>
-
-      {!showStart && (
-        <div className="flex max-w-full flex-wrap items-center justify-center gap-x-1.5 gap-y-1 rounded-[1.6rem] bg-glass px-2 py-1.5 shadow-[0_8px_30px_-12px_rgb(0_0_0/0.25)] ring-1 ring-border backdrop-blur-xl">
-          <div className="flex flex-wrap justify-center" role="group" aria-label="ink">
-            {COLORS.map((c) => {
-              const on = !erasing && color === c;
-              return (
-                <button
-                  key={c}
-                  type="button"
-                  aria-label={`Ink ${c}`}
-                  aria-pressed={on}
-                  title={c}
-                  onClick={() => {
-                    setColor(c);
-                    setErasing(false);
-                  }}
-                  className="group grid size-7 place-items-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring/60 sm:size-8"
-                >
-                  <span
-                    className={cn(
-                      // The inset ring keeps the darkest inks visible on the dark dock.
-                      'size-4 rounded-full ring-1 ring-black/10 ring-inset transition-transform duration-200 sm:size-[18px] dark:ring-white/25',
-                      on ? 'scale-110' : 'group-hover:scale-110',
-                    )}
-                    style={{
-                      backgroundColor: c,
-                      boxShadow: on ? '0 0 0 2px var(--glass), 0 0 0 3.5px var(--foreground)' : undefined,
-                    }}
-                  />
-                </button>
-              );
-            })}
-          </div>
-
-          <span className="mx-1 hidden h-6 w-px bg-border sm:block" aria-hidden="true" />
-
-          <div className="flex items-center gap-2 px-1 text-muted-foreground">
-            <span
-              className="grid size-5 shrink-0 place-items-center"
-              aria-hidden="true"
-              title={`brush ${brushSize}px`}
-            >
-              <span
-                className="rounded-full bg-current"
-                style={{
-                  width: Math.max(3, (brushSize / SIZE_MAX) * SIZE_DOT_MAX),
-                  height: Math.max(3, (brushSize / SIZE_MAX) * SIZE_DOT_MAX),
-                  opacity: brushOpacity,
-                }}
-              />
-            </span>
-            <Slider
-              className="w-20"
-              value={[brushSize]}
-              min={SIZE_MIN}
-              max={SIZE_MAX}
-              step={1}
-              aria-label="Brush size"
-              title={`Brush ${brushSize}px`}
-              onValueChange={([v]) => setBrushSize(v)}
-            />
-          </div>
-
-          <div className="hidden items-center gap-2 px-1 text-muted-foreground sm:flex">
-            <span
-              className="grid size-5 shrink-0 place-items-center"
-              aria-hidden="true"
-              title={`opacity ${Math.round(brushOpacity * 100)}%`}
-            >
-              <Droplet className="size-4" style={{ opacity: 0.35 + brushOpacity * 0.65 }} />
-            </span>
-            <Slider
-              className="w-16"
-              value={[brushOpacity * 100]}
-              min={OPACITY_MIN * 100}
-              max={100}
-              step={1}
-              aria-label="Brush opacity"
-              title={`Opacity ${Math.round(brushOpacity * 100)}%`}
-              onValueChange={([v]) => setBrushOpacity(v / 100)}
-            />
-          </div>
-
-          <span className="mx-1 hidden h-6 w-px bg-border sm:block" aria-hidden="true" />
-
-          <div className="flex items-center">
-            <button
-              type="button"
-              aria-label="Eraser"
-              aria-pressed={erasing}
-              title="Eraser"
-              onClick={() => setErasing((on) => !on)}
-              className={cn(TOOL_CELL, erasing ? TOOL_ON : TOOL_OFF)}
-            >
-              <Eraser className="size-4" />
-            </button>
-            <button
-              type="button"
-              aria-label="Pen sound"
-              aria-pressed={paperSound}
-              title={paperSound ? 'Pen sound: on' : 'Pen sound: off'}
-              onClick={() => setPaperSound((on) => !on)}
-              className={cn(TOOL_CELL, paperSound ? TOOL_ON : TOOL_OFF)}
-            >
-              <AudioLines className="size-4" />
-            </button>
-            <button
-              type="button"
-              aria-label="Undo"
-              title={`Undo (${MOD}Z)`}
-              disabled={!depth.undo}
-              onClick={undo}
-              className={cn(TOOL_CELL, TOOL_OFF, 'disabled:pointer-events-none disabled:opacity-35')}
-            >
-              <Undo2 className="size-4" />
-            </button>
-            <button
-              type="button"
-              aria-label="Redo"
-              title={`Redo (${MOD}⇧Z)`}
-              disabled={!depth.redo}
-              onClick={redo}
-              className={cn(TOOL_CELL, TOOL_OFF, 'disabled:pointer-events-none disabled:opacity-35')}
-            >
-              <Redo2 className="size-4" />
-            </button>
-            <button
-              type="button"
-              aria-label="Clear the page"
-              title="Clear the page"
-              disabled={!hasInk}
-              onClick={clearFromToolbar}
-              className={cn(
-                TOOL_CELL,
-                TOOL_OFF,
-                'hover:text-destructive disabled:pointer-events-none disabled:opacity-35',
-              )}
-            >
-              <Trash2 className="size-4" />
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 });

@@ -1,0 +1,455 @@
+/* Hallmark · macrostructure: Playground · tone: playful · design-system: DESIGN.md
+ * pre-emit critique: P4 H4 E4 S5 R5 V4 */
+@import '../../tokens.css';
+
+.experiment {
+  color-scheme: light;
+  display: flex;
+  flex-direction: column;
+  overflow-x: clip;
+}
+
+.dark .experiment {
+  color-scheme: dark;
+  --color-paper: #191a1c;
+  --color-ink: #f1efe9;
+  --color-ink-soft: #b6b3ad;
+  --color-watercolor-blue: #83b9f0;
+}
+
+.dark .experiment .pencil {
+  filter: brightness(1.3);
+}
+
+.experiment-header .landing-pass {
+  gap: 1rem;
+}
+
+.experiment-frost-tint {
+  background: linear-gradient(to bottom, color-mix(in srgb, var(--color-paper) 80%, transparent) 45%, transparent);
+}
+
+.theme-switcher {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  padding: 3px;
+  border: 1px solid var(--color-experiment-rule);
+  border-radius: 0.875rem;
+  background: var(--color-paper);
+}
+
+.theme-switcher button {
+  display: grid;
+  place-items: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 0.625rem;
+  color: var(--color-ink-soft);
+  cursor: pointer;
+}
+
+.theme-switcher button[aria-pressed='true'] {
+  background: var(--color-experiment-rule);
+  color: var(--color-ink);
+}
+
+@media (hover: hover) {
+  .theme-switcher button:hover {
+    color: var(--color-ink);
+    background: var(--color-experiment-rule);
+  }
+}
+
+/* GitHub with the live star count. The amber star draws itself and shines
+   once, then fills and shines again under the pointer. The count keeps a
+   digit's room, so it lands without nudging the nav. */
+.experiment-github {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.375rem;
+  min-height: 2.75rem;
+  padding-inline: 0.875rem;
+  border: 1px solid var(--color-experiment-rule);
+  border-radius: 0.875rem;
+  background: var(--color-paper);
+  white-space: nowrap;
+}
+
+.experiment-github svg {
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+}
+
+.experiment-github-star {
+  overflow: visible;
+  margin-left: 0.25rem;
+  color: #f0a202; /* pencil amber */
+  fill: transparent;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* pathLength="1" makes a dash of 1 the whole outline. */
+.experiment-github-star path:first-child {
+  stroke-dasharray: 1 2;
+}
+
+.experiment-github-shine {
+  opacity: 0;
+  transform-origin: center;
+}
+
+.experiment-github-count {
+  min-width: 1ch;
+  color: var(--color-ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+.experiment-github:is(:hover, :focus-visible) .experiment-github-star path:first-child {
+  fill: currentColor;
+}
+
+.experiment-github:is(:hover, :focus-visible) .experiment-github-shine {
+  opacity: 1;
+}
+
+@media (hover: hover) {
+  .experiment-github:hover {
+    background-image: linear-gradient(var(--color-experiment-rule), var(--color-experiment-rule));
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .experiment-github-star path:first-child {
+    animation: experiment-star-draw 700ms cubic-bezier(0.65, 0, 0.35, 1) 300ms both;
+    transition: fill 200ms ease;
+  }
+
+  .experiment-github-shine {
+    scale: 0.6;
+    animation: experiment-star-shine 800ms cubic-bezier(0.16, 1, 0.3, 1) 1000ms;
+    transition: opacity 200ms ease, scale 450ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .experiment-github:is(:hover, :focus-visible) .experiment-github-shine {
+    scale: 1;
+  }
+
+  .experiment-github:is(:hover, :focus-visible) .experiment-github-star {
+    animation: experiment-star-wiggle 500ms cubic-bezier(0.37, 0, 0.63, 1);
+  }
+
+  .experiment-github-count:not(:empty) {
+    animation: experiment-star-count 400ms ease-out both;
+  }
+}
+
+/* Past 1, so no round cap dots the start while it waits. */
+@keyframes experiment-star-draw {
+  from {
+    stroke-dashoffset: 1.01;
+  }
+}
+
+/* Ends hidden, as it rests, so hover can bring it back. */
+@keyframes experiment-star-shine {
+  from {
+    opacity: 0;
+    scale: 0.6;
+  }
+  35% {
+    opacity: 1;
+    scale: 1;
+  }
+  to {
+    opacity: 0;
+    scale: 1.1;
+  }
+}
+
+@keyframes experiment-star-wiggle {
+  30% {
+    rotate: -14deg;
+  }
+  65% {
+    rotate: 8deg;
+  }
+}
+
+@keyframes experiment-star-count {
+  from {
+    opacity: 0;
+    translate: 0 0.25em;
+  }
+}
+
+/* Phones: the pill opens the second row instead of stretching across it. */
+@media (max-width: 30rem) {
+  .experiment-header nav > .experiment-github {
+    justify-self: start;
+  }
+}
+
+.experiment-sheet {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+/* Ink sits behind the content, but blank space and words pass the pen through. */
+.experiment-header,
+.experiment-main,
+.experiment-footer {
+  pointer-events: none;
+}
+
+.experiment :is(a, button) {
+  pointer-events: auto;
+}
+
+.experiment-main,
+.experiment-footer {
+  position: relative;
+  z-index: 1;
+}
+
+.experiment :is(h1, p) {
+  text-shadow: 0 0 4px var(--color-paper), 0 0 10px var(--color-paper);
+}
+
+.experiment-draw-toggle,
+.experiment-touch-hint {
+  display: none;
+}
+
+.experiment-main {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-experiment-gap);
+  width: 100%;
+  min-height: calc(100svh - 4.5rem);
+  padding: 6rem var(--spacing-gutter) var(--space-experiment-gap);
+}
+
+.experiment-playground {
+  width: min(100%, 44rem);
+}
+
+.experiment-paper {
+  position: relative;
+  isolation: isolate;
+  height: clamp(13rem, 32svh, 22rem);
+}
+
+.experiment-sketch {
+  position: absolute;
+  inset: 0;
+  width: auto;
+  height: 100%;
+  aspect-ratio: 420 / 330;
+  max-width: 100%;
+  margin: auto;
+  pointer-events: none;
+}
+
+.experiment-sketch canvas {
+  max-height: 100%;
+}
+
+.experiment-tools {
+  display: flex;
+  flex-wrap: wrap;
+  min-height: 2.75rem;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-experiment-small);
+  margin-top: var(--space-experiment-small);
+  color: var(--color-ink-soft);
+  font-size: var(--text-experiment-small);
+}
+
+.experiment-hint {
+  user-select: none;
+}
+
+.experiment-invitation {
+  width: 100%;
+  text-align: center;
+}
+
+.experiment-title {
+  min-width: 0;
+  font-size: var(--text-experiment-display);
+  font-weight: 650;
+  line-height: 1.08;
+  letter-spacing: -0.045em;
+  text-wrap: balance;
+  overflow-wrap: anywhere;
+}
+
+.experiment-description {
+  max-width: 32rem;
+  margin: 1rem auto 0;
+  font-size: var(--text-experiment-body);
+  line-height: 1.6;
+  color: var(--color-ink-soft);
+  text-wrap: balance;
+}
+
+.experiment-start {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 1.75rem;
+}
+
+.experiment-start button {
+  max-width: 100%;
+  white-space: nowrap;
+}
+
+.experiment-note {
+  max-width: 23rem;
+  color: var(--color-ink-soft);
+  font-size: var(--text-experiment-small);
+  line-height: 1.5;
+  text-wrap: balance;
+}
+
+.experiment-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem 2rem;
+  width: 100%;
+  max-width: 72rem;
+  margin: auto auto 0;
+  padding: 1.25rem var(--spacing-gutter);
+  color: var(--color-ink-soft);
+  font-size: var(--text-experiment-small);
+}
+
+.experiment-footer nav {
+  display: flex;
+  gap: 1.5rem;
+}
+
+.experiment-footer a {
+  white-space: nowrap;
+}
+
+@media (hover: hover) {
+  .experiment-footer a:hover {
+    text-decoration: underline;
+    color: var(--color-watercolor-blue);
+  }
+}
+
+/* Touch begins in scroll mode. A visible switch makes drawing an explicit gesture. */
+@media (hover: none), (pointer: coarse) {
+  .theme-switcher button {
+    width: 2.5rem;
+    height: 2.75rem;
+  }
+
+  .experiment-header nav {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 0.25rem 0.5rem;
+    font-size: 0.8125rem;
+  }
+
+  .experiment:not([data-touch-drawing='true']) .experiment-wall {
+    pointer-events: none;
+  }
+
+  .experiment[data-touch-drawing='true'] {
+    overflow-y: hidden;
+  }
+
+  .experiment-draw-toggle {
+    display: inline-flex;
+    align-items: center;
+    min-height: 2.75rem;
+    padding-inline: 0.75rem;
+    border-radius: 0.75rem;
+    background: var(--color-paper);
+    box-shadow: inset 0 0 0 1px var(--color-experiment-rule);
+    white-space: nowrap;
+  }
+
+  .experiment-draw-toggle[aria-pressed='true'] {
+    color: var(--color-watercolor-blue);
+    box-shadow: inset 0 0 0 1px currentColor;
+  }
+
+  .experiment-mouse-hint {
+    display: none;
+  }
+
+  .experiment-touch-hint {
+    display: inline;
+  }
+}
+
+@media (max-width: 30rem) {
+  .experiment-header .landing-pass {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    row-gap: 0.5rem;
+  }
+
+  .experiment-header nav {
+    display: contents;
+  }
+
+  .experiment-header .theme-switcher {
+    grid-area: 1 / 2;
+  }
+
+  .experiment-header nav > a {
+    grid-area: 2 / 1;
+    align-self: center;
+    font-size: 0.8125rem;
+  }
+
+  .experiment-draw-toggle {
+    grid-area: 2 / 2;
+    justify-content: center;
+    font-size: 0.8125rem;
+  }
+
+  .experiment-main {
+    min-height: calc(100svh - 7rem);
+    padding-top: 9rem;
+  }
+
+  .experiment-title {
+    max-width: 11ch;
+    margin-inline: auto;
+  }
+
+  .experiment-description {
+    max-width: 26ch;
+  }
+
+  .experiment-footer {
+    flex-direction: column;
+    align-items: center;
+    gap: 0.75rem;
+    text-align: center;
+  }
+}

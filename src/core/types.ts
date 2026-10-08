@@ -32,10 +32,13 @@ export interface MixConfig {
   muteDrums: boolean;
 }
 
+export type ConfigLocks = Partial<Record<keyof MixConfig, boolean>>;
+
 export interface SkuzicState {
   backend: Backend;
   tracks: Track[];
   config: MixConfig;
+  configLocks: ConfigLocks;
   /** Bumped when the model should hard-restart generation. */
   contextEpoch: number;
 }
@@ -47,7 +50,8 @@ export type Action =
   | { type: 'MODIFY_TRACK'; target: string; label?: string; prompt?: string }
   | { type: 'SET_VOLUME'; target: string; volume: number }
   | { type: 'SET_MUTED'; target: string; muted: boolean }
-  | { type: 'SET_CONFIG'; config: Partial<MixConfig> }
+  | { type: 'SET_CONFIG'; config: Partial<MixConfig>; source?: 'user' }
+  | { type: 'SET_CONFIG_LOCK'; field: keyof MixConfig; locked: boolean }
   | { type: 'SET_BACKEND'; backend: Backend }
   | { type: 'CLEAR_TRACKS' }
   | { type: 'RESET_CONTEXT' };
@@ -73,6 +77,25 @@ export type Action =
  * `bpm` 90 sits where the model can read either half-time or double-time
  * without a context reset, so energy can swing wide while the pulse holds.
  */
+/**
+ * skuzic only plays calm music, so every setting lives inside a calm band.
+ * Tempo and guidance are held to theirs where config changes land (the
+ * reducer). Energy and brightness keep a 0..1 dial that the page, the sliders
+ * and Gemini all use in full; only the way out to Lyria squeezes it into the
+ * band, so "busy" means as full as calm gets.
+ */
+export const CALM = {
+  bpm: [60, 100],
+  guidance: [0, 5],
+  density: [0.15, 0.6],
+  brightness: [0.35, 0.8],
+} as const;
+
+export const clampTo = ([lo, hi]: readonly [number, number], v: number) => Math.min(hi, Math.max(lo, v));
+
+/** A 0..1 dial position, played inside a calm band. */
+export const inCalm = ([lo, hi]: readonly [number, number], v: number) => lo + (hi - lo) * v;
+
 export const INITIAL_CONFIG: MixConfig = {
   bpm: 90,
   density: 0.5,
@@ -87,5 +110,6 @@ export const INITIAL_STATE: SkuzicState = {
   backend: 'lyria',
   tracks: [],
   config: INITIAL_CONFIG,
+  configLocks: {},
   contextEpoch: 0,
 };

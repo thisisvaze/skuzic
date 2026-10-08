@@ -1,12 +1,26 @@
-import { checkGeminiKey } from '../src/audio/lyria';
+import { Scale } from '@google/genai';
+import { checkGeminiKey, toApiConfig } from '../src/audio/lyria';
 import { NOTES, attend, frictionLevel, mayPlay, nextNote, phrase } from '../src/audio/touch';
-import { DEFAULT_VIBE, chooseInstruments, chooseMood, isIntro, mixActions, nextMix, readPage, vibeById } from '../src/vision/eyes';
+import {
+  DEFAULT_VIBE,
+  chooseInstruments,
+  figuresOf,
+  introMix,
+  isIntro,
+  mixActions,
+  nextMix,
+  readFigure,
+  readScene,
+  titleOf,
+  vibeById,
+} from '../src/vision/eyes';
 import { inkConfig } from '../src/vision/ink';
+import { keepRefinement } from '../src/llm/planner';
 import vectors from '../src/vision/palette-vectors.json';
 import palette from '../src/vision/palette.json';
 import { maxTracksFor, reduce, reduceAll } from '../src/core/reducer';
 import { normalize } from '../src/core/schema';
-import { INITIAL_STATE, type Action, type SkuzicState } from '../src/core/types';
+import { INITIAL_STATE, type Action, type MixConfig, type SkuzicState } from '../src/core/types';
 
 const MAX_TRACKS = maxTracksFor('lyria');
 
@@ -78,11 +92,52 @@ check('clears all', s.tracks.length === 0);
 
 // Config clamping
 let c = reduce(INITIAL_STATE, { type: 'SET_CONFIG', config: { bpm: 400, density: -2 } });
-check('clamps bpm to 200', c.config.bpm === 200, c.config.bpm);
+check('holds bpm to the calm 100', c.config.bpm === 100, c.config.bpm);
 check('clamps density to 0', c.config.density === 0, c.config.density);
 c = reduce(c, { type: 'SET_CONFIG', config: { bpm: 10 } });
 check('clamps bpm to 60', c.config.bpm === 60, c.config.bpm);
+c = reduce(c, { type: 'SET_CONFIG', config: { guidance: 6 } });
+check('holds guidance to the calm 5', c.config.guidance === 5, c.config.guidance);
+const loud = toApiConfig({ ...INITIAL_STATE.config, density: 1, brightness: 1 });
+const hushed = toApiConfig({ ...INITIAL_STATE.config, density: 0, brightness: 0 });
+check(
+  'the full dial reaches Lyria only as busy and bright as calm gets',
+  Math.abs(loud.density! - 0.6) < 1e-9 && Math.abs(loud.brightness! - 0.8) < 1e-9 &&
+    Math.abs(hushed.density! - 0.15) < 1e-9 && Math.abs(hushed.brightness! - 0.35) < 1e-9,
+  [loud.density, loud.brightness, hushed.density, hushed.brightness],
+);
 check('leaves untouched config alone', c.config.brightness === INITIAL_STATE.config.brightness);
+
+console.log('control locks');
+const requested: MixConfig = {
+  bpm: 72, density: 0.8, brightness: 0.2, guidance: 1,
+  scale: Scale.C_MAJOR_A_MINOR, muteDrums: true, muteBass: true,
+};
+const fields = Object.keys(requested) as (keyof MixConfig)[];
+const queuedChange: Action = { type: 'SET_CONFIG', config: requested };
+const locked = reduceAll(INITIAL_STATE, fields.map((field) => ({ type: 'SET_CONFIG_LOCK', field, locked: true })));
+const blocked = reduce(locked, queuedChange);
+check('every locked control rejects an automatic or in-flight change', blocked === locked);
+check('locking never changes the current values', locked.config === INITIAL_STATE.config);
+
+const manual = reduce(locked, { ...queuedChange, source: 'user' });
+check('direct controls can still adjust locked values', fields.every((field) => manual.config[field] === requested[field]));
+check('manual adjustment keeps all locks engaged', fields.every((field) => manual.configLocks[field]));
+check('a later automatic update cannot undo the manual adjustment',
+  reduce(manual, { type: 'SET_CONFIG', config: INITIAL_STATE.config }) === manual);
+
+const unlocked = reduce(locked, { type: 'SET_CONFIG_LOCK', field: 'brightness', locked: false });
+const partial = reduce(unlocked, queuedChange);
+check('unlocking allows only that control to follow again', partial.config.brightness === requested.brightness &&
+  fields.filter((field) => field !== 'brightness').every((field) => partial.config[field] === INITIAL_STATE.config[field]));
+
+const refined = keepRefinement([queuedChange], locked.tracks, locked.config);
+check('drawing refinements respect the same locks', reduceAll(locked, refined.actions) === locked);
+const modelReply = { type: 'SET_CONFIG', bpm: 72, source: 'user' };
+check('model output cannot claim to be a direct user adjustment',
+  reduceAll(locked, normalize([modelReply], 'slow down')) === locked);
+check('locked values remain clamped when edited manually',
+  reduce(locked, { type: 'SET_CONFIG', config: { bpm: 500 }, source: 'user' }).config.bpm === 100);
 
 // Context epoch
 const e = reduce(INITIAL_STATE, { type: 'RESET_CONTEXT' });
@@ -187,24 +242,73 @@ check('friction never exceeds full level', frictionLevel(1e6, 1) <= 1);
 
 console.log('eyes');
 
-type Table = Record<string, { tags: string[]; vector: number[] } | undefined>;
-const fresh = (entries: { id: string; tags: string[] }[], table: Table) =>
+type Table = Record<string, { tags: string[]; doodles?: string[]; vector: number[] } | undefined>;
+const fresh = (entries: { id: string; tags: string[]; doodles?: string[] }[], table: Table) =>
   entries.every((e) =>
     e.tags.length
-      ? JSON.stringify(table[e.id]?.tags) === JSON.stringify(e.tags) && table[e.id]?.vector.length === 768
+      ? JSON.stringify(table[e.id]?.tags) === JSON.stringify(e.tags) &&
+        JSON.stringify(table[e.id]?.doodles) === JSON.stringify(e.doodles) &&
+        table[e.id]?.vector.length === 768
       : !table[e.id],
   );
 check(
-  'palette vectors match the tags (re-run scripts/embed-palette.py after editing them)',
+  'palette vectors match the tags and doodles (re-run scripts/embed-palette.py after editing them)',
   fresh(palette.moods, vectors.moods) && fresh(palette.instruments, vectors.instruments),
 );
+check(
+  'every mood plays its own prompt, since the mixer keys layers on prompt text',
+  new Set(palette.moods.map((m) => m.prompt)).size === palette.moods.length,
+);
+check('a figure that reads exactly like rain picks rain', readFigure(vectors, vectors.moods.rainy.vector)[0].item.id === 'rainy');
 
-const rainy = readPage(vectors.moods.rainy.vector);
-check('a page that reads exactly like rain picks the rain mood', rainy.moods[0].item.id === 'rainy');
-const [m1, m2] = rainy.moods.map((r) => r.item);
-check('an ambiguous page keeps the playing mood', chooseMood([{ item: m1, p: 0.3 }, { item: m2, p: 0.25 }], null) === null);
-check('a narrow lead keeps the playing mood', chooseMood([{ item: m1, p: 0.5 }, { item: m2, p: 0.4 }], m2.id) === null);
-check('a clear, confident reading switches mood', chooseMood([{ item: m1, p: 0.8 }, { item: m2, p: 0.1 }], m2.id) === m1);
+const segment = (x0: number, y0: number, x1: number, y1: number) =>
+  Array.from({ length: 30 }, (_, k) => [x0 + ((x1 - x0) * k) / 29, y0 + ((y1 - y0) * k) / 29]);
+const mark = (id: number, color: string, points: number[][], erasing = false) => ({ id, color, points, erasing });
+const sheet = { width: 1000, height: 800 };
+const sun = [mark(0, 'gold', segment(800, 100, 900, 100)), mark(1, 'gold', segment(850, 50, 850, 150))];
+check('strokes drawn together in one ink make one figure', figuresOf(sun, sheet).length === 1);
+check('a new ink starts a new figure', figuresOf([...sun, mark(2, 'red', segment(860, 110, 880, 130))], sheet).length === 2);
+check('a stroke far from the last figure starts another', figuresOf([...sun, mark(2, 'gold', segment(100, 600, 200, 600))], sheet).length === 2);
+const rubbed = figuresOf([...sun, mark(3, 'paper', segment(840, 90, 860, 110), true)], sheet);
+check(
+  'an eraser across a figure changes its key, so it is read again',
+  rubbed.length === 1 && rubbed[0].key !== figuresOf(sun, sheet)[0].key,
+);
+
+const mood = (id: string) => palette.moods.find((m) => m.id === id)!;
+const figure = (key: string, size: number, reads: [string, number][], strokes = 5) => ({
+  figure: { key, box: { x: 0, y: 0, width: size, height: size }, strokes },
+  image: vectors.moods[reads[0][0] as keyof typeof vectors.moods].vector,
+  moods: reads.map(([id, p]) => ({ item: mood(id), p })),
+});
+const scenery = [
+  figure('m', 600, [['mountains', 0.95], ['volcano', 0.05]]),
+  figure('s', 150, [['sunny', 1]]),
+  figure('t', 300, [['trees', 0.9], ['xmas', 0.1]]),
+];
+const landscape = nextMix(readScene(vectors, scenery), null)!;
+check('a landscape plays its things together, the biggest first', titleOf(landscape) === 'mountains, trees and sunshine', titleOf(landscape));
+const biked = nextMix(readScene(vectors, [...scenery, figure('b', 250, [['bicycle', 0.97], ['car', 0.03]])]), landscape);
+check(
+  'a bike drawn into a finished landscape joins the music without taking it over',
+  biked?.moods[0].item.id === 'mountains' && biked.moods.some((r) => r.item.id === 'bicycle'),
+  biked && titleOf(biked),
+);
+check('the same reading twice changes nothing', nextMix(readScene(vectors, scenery), landscape) === null);
+const unsure = [figure('x', 300, [['energy', 0.3], ['water', 0.25], ['spiral', 0.25], ['snake', 0.2]])];
+check('an unsure first reading starts the intro', isIntro(nextMix(readScene(vectors, unsure), null)!));
+check('the intro waits for something SigLIP is sure of', nextMix(readScene(vectors, unsure), introMix(DEFAULT_VIBE)) === null);
+const opening = [figure('a', 300, [['energy', 0.9], ['water', 0.1]], 1)];
+check(
+  'a first stroke that reads only as squiggles keeps the intro',
+  isIntro(nextMix(readScene(vectors, opening), null)!) && nextMix(readScene(vectors, opening), introMix(DEFAULT_VIBE)) === null,
+);
+check(
+  'a figure that reads clearly as a thing counts from its first stroke',
+  titleOf(nextMix(readScene(vectors, [figure('s', 300, [['sunny', 0.9], ['energy', 0.1]], 1)]), null)!) === 'sunshine',
+);
+const marked = nextMix(readScene(vectors, [figure('m', 300, [['mountains', 0.9], ['energy', 0.1]]), figure('q', 400, [['energy', 0.95], ['water', 0.05]], 1), figure('n', 300, [['energy', 0.8], ['snake', 0.2]], 1)]), null)!;
+check('a finished scribble adds colour but the things lead', titleOf(marked) === 'mountains and squiggles', titleOf(marked));
 
 const [i1, i2, i3] = palette.instruments;
 const seats = (ids: string[]) => chooseInstruments(
@@ -219,36 +323,46 @@ check(
   JSON.stringify(chooseInstruments([{ item: i3, p: 0.35 }, { item: i1, p: 0.33 }, { item: i2, p: 0.32 }], [i1.id, i2.id]).map((i) => i.id)) ===
     JSON.stringify([i1.id, i2.id]),
 );
-check('an unsure first reading starts the intro', isIntro(nextMix({ moods: [{ item: m1, p: 0.3 }], instruments: rainy.instruments }, null)!));
-check('the same reading twice changes nothing', nextMix(rainy, nextMix(rainy, null)) === null);
 
-const mixed = (backend: 'lyria' | 'magenta') => mixActions(nextMix(rainy, null)!, backend, { density: 0.4, brightness: 0.4 });
-const layers = (backend: 'lyria' | 'magenta') => mixed(backend).filter((a) => a.type === 'ADD_TRACK');
+const rain = [figure('r', 400, [['rainy', 1]])];
+const rainy = nextMix(readScene(vectors, rain), null)!;
+const layers = (mix: typeof rainy, backend: 'lyria' | 'magenta') =>
+  mixActions(mix, backend, { density: 0.4, brightness: 0.4 }).filter((a) => a.type === 'ADD_TRACK');
 check(
-  'a mix is ground, mood and up to two instruments, never below 0.15',
-  mixed('lyria')[0].type === 'CLEAR_TRACKS' && layers('lyria').length <= 4 && layers('lyria').every((a) => a.type === 'ADD_TRACK' && a.volume >= 0.15),
+  'a mix is ground, up to three things and up to two instruments, never below 0.15',
+  mixActions(landscape, 'lyria', {})[0].type === 'CLEAR_TRACKS' &&
+    layers(landscape, 'lyria').length <= 6 &&
+    layers(landscape, 'lyria').every((a) => a.type === 'ADD_TRACK' && a.volume >= 0.15),
 );
 check(
   'each engine gets its measured balance',
-  layers('lyria')[0].type === 'ADD_TRACK' && layers('lyria')[0].prompt === DEFAULT_VIBE.ground.lyria &&
-    layers('magenta')[0].type === 'ADD_TRACK' && layers('magenta')[0].prompt === DEFAULT_VIBE.ground.magenta &&
-    layers('lyria')[1].type === 'ADD_TRACK' && layers('lyria')[1].volume === palette.moodWeight.lyria &&
-    layers('magenta')[1].type === 'ADD_TRACK' && layers('magenta')[1].volume === palette.moodWeight.magenta,
+  layers(rainy, 'lyria')[0].type === 'ADD_TRACK' && layers(rainy, 'lyria')[0].prompt === DEFAULT_VIBE.ground.lyria &&
+    layers(rainy, 'magenta')[0].type === 'ADD_TRACK' && layers(rainy, 'magenta')[0].prompt === DEFAULT_VIBE.ground.magenta &&
+    layers(rainy, 'lyria')[1].type === 'ADD_TRACK' && layers(rainy, 'lyria')[1].volume === palette.moodWeight.lyria &&
+    layers(rainy, 'magenta')[1].type === 'ADD_TRACK' && layers(rainy, 'magenta')[1].volume === palette.moodWeight.magenta,
+);
+check(
+  'each thing is its own layer, named for it, the biggest loudest',
+  layers(landscape, 'lyria')
+    .slice(1, 4)
+    .map((a) => (a.type === 'ADD_TRACK' ? `${a.label} ${a.volume}` : ''))
+    .join(', ') === 'mountains 0.26, trees 0.15, sunshine 0.15',
+  layers(landscape, 'lyria'),
 );
 
 const jazz = vibeById('jazz');
 const piano = vibeById('piano');
 check(
   'a vibe plays in its own style',
-  mixActions(nextMix(rainy, null)!, 'lyria', {}, jazz).some((a) => a.type === 'ADD_TRACK' && a.label === 'Style' && a.prompt === jazz.ground.lyria),
+  mixActions(rainy, 'lyria', {}, jazz).some((a) => a.type === 'ADD_TRACK' && a.label === 'Style' && a.prompt === jazz.ground.lyria),
 );
 check(
   "only the vibe's own instruments compete for a seat",
-  readPage(vectors.moods.rainy.vector, jazz).instruments.every((r) => jazz.instruments.includes(r.item.id)),
+  readScene(vectors, rain, jazz).instruments.every((r) => jazz.instruments.includes(r.item.id)),
 );
 check(
-  'a vibe without instruments plays its style and the mood alone',
-  nextMix(readPage(vectors.moods.rainy.vector, piano), null, piano)!.instruments.length === 0,
+  'a vibe without instruments plays its style and the page alone',
+  nextMix(readScene(vectors, rain, piano), null, piano)!.instruments.length === 0,
 );
 check(
   'every vibe names real instruments and a style for each engine',
@@ -258,6 +372,38 @@ check(
       [...v.start, ...v.instruments].every((id) => palette.instruments.some((i) => i.id === id)) &&
       v.start.every((id) => v.instruments.includes(id)),
   ),
+);
+
+console.log('gemini refine');
+
+const live = [
+  { id: 's', label: 'Style', prompt: 'dreamy lo-fi hip hop', volume: 1, muted: false, origin: 'eyes' },
+  { id: 'w', label: 'water', prompt: 'flowing and serene', volume: 0.45, muted: false, origin: 'eyes' },
+  { id: 'p', label: 'felt piano', prompt: 'soft felt piano melody', volume: 0.6, muted: false, origin: 'eyes' },
+];
+const kept = keepRefinement(
+  [
+    { type: 'MODIFY_TRACK', target: 'w', prompt: 'dusky, swirling and dreamlike' },
+    { type: 'MODIFY_TRACK', target: 's', prompt: 'dark techno' },
+    { type: 'MODIFY_TRACK', target: 'Felt Piano', prompt: 'felt piano, slow and rubato' },
+    { type: 'ADD_TRACK', label: 'Choir', prompt: 'angelic choir', volume: 0.5 },
+    { type: 'CLEAR_TRACKS' },
+    { type: 'SET_CONFIG', config: { density: 0.95, bpm: 140 } },
+  ],
+  live,
+  { density: 0.4, brightness: 0.6 },
+);
+check(
+  'a refine rewrites only the layers\' words, by id or by label when the eyes rebuilt the tracks',
+  JSON.stringify([...kept.words]) === JSON.stringify([['water', 'dusky, swirling and dreamlike'], ['felt piano', 'felt piano, slow and rubato']]),
+  [...kept.words],
+);
+check('a refine never touches the style, adds, removes or clears', kept.actions.every((a) => a.type === 'MODIFY_TRACK' ? a.target !== 's' : a.type === 'SET_CONFIG'));
+check(
+  'a refine moves only the two live knobs, inside their gentle range',
+  JSON.stringify(kept.knobs) === JSON.stringify({ density: 0.85, brightness: 0.6 }) &&
+    kept.actions.some((a) => a.type === 'SET_CONFIG' && !('bpm' in a.config)),
+  kept.knobs,
 );
 
 console.log('ink');

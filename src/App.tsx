@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { Pause, Play, SettingsIcon, SlidersHorizontal, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Slider } from '@/components/ui/slider';
 import { cn } from '@/lib/utils';
 import {
   BACKEND_LABELS,
@@ -27,7 +26,9 @@ import {
 } from './llm/configs';
 import {
   DEFAULT_PLANNER_MODEL,
+  PLANNER_MODELS,
   createPlanner,
+  keepRefinement,
   isPlannerModel,
   type Plan,
   type PlannerModel,
@@ -36,14 +37,19 @@ import {
   DEFAULT_VIBE,
   VIBES,
   eyesOwn,
+  feelOf,
+  figuresOf,
   introMix,
   isIntro,
   loadEyes,
   mixActions,
   nextMix,
-  readPage,
+  readFigure,
+  readScene,
+  titleOf,
   vibeById,
   type Mix,
+  type Seen,
   type Vibe,
 } from './vision/eyes';
 import { inkConfig, inkOf, type Ink } from './vision/ink';
@@ -52,7 +58,8 @@ import { ActionLog, type LogEntry } from './ui/ActionLog';
 import { KeyDialog } from './ui/KeyDialog';
 import { DrawCanvas, type CanvasHandle } from './ui/DrawCanvas';
 import { Equalizer } from './ui/Equalizer';
-import { Landing, Wordmark } from './ui/Landing';
+import { Landing } from './ui/Landing';
+import { SkuzicLogo } from './components/SkuzicLogo';
 import { Mixer } from './ui/Mixer';
 import { Settings, type Theme } from './ui/Settings';
 import { VibeStart } from './ui/VibePicker';
@@ -71,8 +78,41 @@ type Planner = ReturnType<typeof createPlanner>;
 /** How long the band takes to wind down when the page is wiped. */
 const CLEAR_FADE = 3;
 
+/** A change of words fades in, Apple-quiet; still under reduced motion. */
+const FADE_IN = 'animate-in fade-in-0 duration-300 ease-out motion-reduce:animate-none';
+
+/** The music's level. There's no volume control in the app; the device's own does that job. */
+const VOLUME = 0.8;
+
+const modelName = (id: string) => PLANNER_MODELS.find((m) => m.id === id)?.detail ?? id;
+
+/** A note for the log when the other Gemini tier answered because the chosen one couldn't. */
+function standIn(plan: Plan, chosen: PlannerModel): string {
+  return plan.model === chosen ? '' : ` (${modelName(plan.model)} answered; ${modelName(chosen)} was busy or out of quota)`;
+}
+
+/** A failed plan in a line someone can act on. */
+function unanswered(message: string): string {
+  if (message.includes('HTTP 429')) return 'Gemini is out of quota on your key right now. Try again later, or use Add a sound.';
+  if (message.includes('HTTP 503')) return 'Gemini is overloaded right now. Try again in a moment.';
+  if (message.includes('timed out')) return 'Gemini took too long to answer. Try again.';
+  return "Gemini didn't answer. Try again in a moment.";
+}
+
+/**
+ * Gemini refines at most this often, in ms, and only while the page changes.
+ * A pass takes a second or two and Lyria another three or so to be heard, so
+ * faster would only stack refinements nobody hears apart.
+ */
+const REFINE_EVERY = 3500;
+/** After a failed refine (a rate limit, an outage), wait this long instead. */
+const REFINE_BACKOFF = 20_000;
+
 /** Wide enough for the mixer to sit beside the paper instead of over it (Tailwind's lg). */
 const wide = () => window.matchMedia('(min-width: 1024px)').matches;
+
+/** The landing lives at /, the studio at /app. */
+const viewAt = (path: string): 'landing' | 'studio' => (/^\/app(\/|$)/.test(path) ? 'studio' : 'landing');
 
 /** One arm of a pending A/B choice, with its resulting mix precomputed. */
 interface AbVariantPlan {
@@ -96,33 +136,36 @@ interface PendingAb {
   shownAt: number;
 }
 
-const DOT: Record<EngineStatus, string> = {
-  idle: 'bg-muted-foreground/50',
-  connecting: 'bg-warn animate-pulse',
-  ready: 'bg-muted-foreground',
-  playing: 'bg-live',
-  paused: 'bg-muted-foreground',
-  error: 'bg-destructive',
-};
-
 export default function App() {
   // Engine settings survive a reload; tracks deliberately do not, since the
   // mix only means something alongside the drawing that produced it.
   const [state, dispatch] = useReducer(reduce, INITIAL_STATE, (initial) => ({
     ...initial,
     backend: loadBackend(initial.backend),
-    config: load(KEYS.config, initial.config),
+    // Through the reducer, so a config saved before the calm bands is held to them.
+    config: reduce(initial, { type: 'SET_CONFIG', config: load(KEYS.config, initial.config) }).config,
+    configLocks: load(KEYS.configLocks, initial.configLocks),
   }));
   const [status, setStatus] = useState<EngineStatus>('idle');
   const [statusDetail, setStatusDetail] = useState('');
   const [buffered, setBuffered] = useState(0);
-  const [masterVolume, setMasterVolume] = useState(() => load(KEYS.masterVolume, 0.8));
   const [thinking, setThinking] = useState(false);
+  /** Why the last Ask or Reimagine got no answer, shown by the Ask box until the next try. */
+  const [planError, setPlanError] = useState<string | null>(null);
   const [log, setLog] = useState<LogEntry[]>([]);
-  /** First visit, or the wordmark: the landing. A saved key goes straight to drawing. */
-  const [view, setView] = useState<'landing' | 'studio'>(() =>
-    load(KEYS.apiKey, '') ? 'studio' : 'landing',
-  );
+  /** Which one the URL says. Both stay mounted, so going between them never loses the drawing. */
+  const [view, setView] = useState(() => viewAt(location.pathname));
+  /** Moves between them with a real URL, so links, reloads and the back button all agree. */
+  const go = (next: 'landing' | 'studio') => {
+    const path = next === 'studio' ? '/app' : '/';
+    if (location.pathname !== path) history.pushState(null, '', path);
+    setView(next);
+  };
+  useEffect(() => {
+    const onPop = () => setView(viewAt(location.pathname));
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
   /** Docked beside the paper on wide screens, where it starts open; a sheet on phones, where it starts closed. */
   const [mixerOpen, setMixerOpen] = useState(() => wide() && load(KEYS.mixerOpen, true));
   const showMixer = (open: boolean) => {
@@ -130,8 +173,6 @@ export default function App() {
     if (wide()) save(KEYS.mixerOpen, open);
   };
   const [settingsOpen, setSettingsOpen] = useState(false);
-  /** What the top bar says the band is hearing: a scene, or Gemini's take. */
-  const [scene, setScene] = useState<string | null>(null);
   /** The style the session plays in and the instruments a drawing may bring in. */
   const [vibe, setVibe] = useState<Vibe>(() => vibeById(load(KEYS.vibe, DEFAULT_VIBE.id)));
   // Read inside readDrawing, a stable callback; set by hand on pick so a read
@@ -158,8 +199,9 @@ export default function App() {
     media.addEventListener('change', apply);
     return () => media.removeEventListener('change', apply);
   }, [theme]);
-  const [autoInterpret, setAutoInterpret] = useState(() => load(KEYS.autoInterpret, true));
   const [abTest, setAbTest] = useState(() => load(KEYS.abTest, false));
+  /** Gemini refines the music every few seconds while the page changes. */
+  const [follow, setFollow] = useState(() => load(KEYS.follow, true));
   const [pendingAb, setPendingAb] = useState<PendingAb | null>(null);
   /** Which pending variant the engine is playing right now. */
   const [abAudition, setAbAudition] = useState(0);
@@ -236,6 +278,11 @@ export default function App() {
     abTestRef.current = abTest;
   }, [abTest]);
 
+  const followRef = useRef(follow);
+  useEffect(() => {
+    followRef.current = follow;
+  }, [follow]);
+
   const plannerModelRef = useRef<PlannerModel>(plannerModel);
   useEffect(() => {
     plannerModelRef.current = plannerModel;
@@ -251,10 +298,6 @@ export default function App() {
   useEffect(() => {
     abAuditionRef.current = abAudition;
   }, [abAudition]);
-  const masterVolumeRef = useRef(masterVolume);
-  useEffect(() => {
-    masterVolumeRef.current = masterVolume;
-  }, [masterVolume]);
 
   useEffect(() => {
     void countRecords().then(setDatasetCount);
@@ -349,21 +392,15 @@ export default function App() {
     engineRef.current?.resetContext();
   }, [state.contextEpoch]);
 
-  useEffect(() => {
-    // During a dual-stream audition the slider belongs to whichever arm is
-    // audible; the other stays hard-muted or the point of the mute is lost.
-    const audition = auditionEngineRef.current;
-    if (audition && abAuditionRef.current === 1) audition.setMasterVolume(masterVolume);
-    else engineRef.current?.setMasterVolume(masterVolume);
-    previewRef.current?.setVolume(masterVolume);
-    save(KEYS.masterVolume, masterVolume);
-  }, [masterVolume]);
-
   // bpm, density, brightness, guidance, scale and the mutes, however they were
   // changed — by hand in the panel or by the planner.
   useEffect(() => {
     save(KEYS.config, state.config);
   }, [state.config]);
+
+  useEffect(() => {
+    save(KEYS.configLocks, state.configLocks);
+  }, [state.configLocks]);
 
   // Swap the planner in place so the picker takes effect mid-session rather
   // than only on the next start. A plan already in flight finishes on the old
@@ -544,7 +581,7 @@ export default function App() {
     // The planner always runs on Gemini, whichever backend makes the audio.
     plannerRef.current = createPlanner(key, plannerModel);
     plannerBRef.current = createPlanner(key, plannerModel);
-    if (autoInterpret) warmEyes();
+    warmEyes();
 
     try {
       await engine.connect();
@@ -555,7 +592,7 @@ export default function App() {
         void engine.close();
         return;
       }
-      engine.setMasterVolume(masterVolume);
+      engine.setMasterVolume(VOLUME);
       engineReady.current = true;
 
       await engine.setConfig(stateRef.current.config);
@@ -609,9 +646,9 @@ export default function App() {
     // The next session reads the page fresh rather than assuming the old scene.
     previewRef.current?.stop(0.3);
     mixRef.current = null;
+    forgetRefinements();
     startNow.current = false;
     engineReady.current = false;
-    setScene(null);
   };
 
   /**
@@ -631,7 +668,7 @@ export default function App() {
     const mix = mixRef.current;
     if (mix && eyesOwn(stateRef.current.tracks, mix)) {
       const { density, brightness } = stateRef.current.config;
-      mixActions(mix, next, { density, brightness }, vibeRef.current).forEach((action) => dispatch(action));
+      mixActions(mix, next, { density, brightness }, vibeRef.current, wordsRef.current).forEach((action) => dispatch(action));
     }
     save(KEYS.backend, next);
     if (!engineRef.current) return;
@@ -639,10 +676,11 @@ export default function App() {
     await start(next);
   };
 
-  // Same as iOS: connect as soon as the page loads so drawing later does not
-  // need another Start tap. Playback still waits for ink + a live mix.
+  // Same as iOS: connect as soon as the studio loads so drawing later does not
+  // need another Start tap. Playback still waits for ink + a live mix. On the
+  // landing it waits for Start drawing instead.
   useEffect(() => {
-    if (!apiKeyRef.current) return;
+    if (!apiKeyRef.current || viewAt(location.pathname) !== 'studio') return;
     void start();
     // Intentionally once on mount — start() is re-entered via the overlay after stop.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -650,6 +688,23 @@ export default function App() {
 
   const connected = status !== 'idle' && status !== 'error';
   const playing = status === 'playing';
+
+  // The landing has sounds of its own, so the music pauses under it (however it
+  // gets going there) and picks up on the way back, if it was playing.
+  const resumeOnReturn = useRef(false);
+  useEffect(() => {
+    if (view === 'landing') {
+      previewRef.current?.stop(0.5);
+      if (!playing) return;
+      resumeOnReturn.current = true;
+      engineRef.current?.pause();
+      auditionEngineRef.current?.pause();
+    } else if (resumeOnReturn.current) {
+      resumeOnReturn.current = false;
+      engineRef.current?.play();
+      auditionEngineRef.current?.play();
+    }
+  }, [view, playing]);
   // `playing` flips the instant we send the command, but Lyria still has to
   // generate and stream a first chunk before there is anything to hear. Gate
   // the equalizer on audio actually being queued instead, or it bounces over
@@ -736,14 +791,16 @@ export default function App() {
                 );
 
                 if (plans[0] && plans[1]) {
+                  // Include locks and manual edits made while the requests ran.
+                  const currentBase = stateRef.current;
                   const variants = pair.map((configId, i) => {
                     const plan = plans[i] as Plan;
-                    return { configId, model, plan, next: reduceAll(base, plan.actions) };
+                    return { configId, model, plan, next: reduceAll(currentBase, plan.actions) };
                   });
                   const pending: PendingAb = {
                     event: jobEvent,
                     image,
-                    base,
+                    base: currentBase,
                     variants,
                     encode,
                     buffer: bufferRef.current,
@@ -804,10 +861,9 @@ export default function App() {
             // planner and start() installs a new one.
             if (plannerRef.current === planner) {
               plan.actions.forEach((action: Action) => dispatch(action));
-              setScene('your page, reimagined');
-              canvasRef.current?.cue();
+              setPlanError(null);
               pushLog({
-                event: jobEvent,
+                event: jobEvent + standIn(plan, plannerModelRef.current),
                 reasoning: plan.reasoning,
                 actions: plan.actions,
                 timings: {
@@ -821,10 +877,9 @@ export default function App() {
               });
             }
           } catch (error) {
-            pushLog({
-              event: jobEvent,
-              error: error instanceof Error ? error.message : String(error),
-            });
+            const message = error instanceof Error ? error.message : String(error);
+            setPlanError(unanswered(message));
+            pushLog({ event: jobEvent, error: message });
           }
 
           job = queued.current;
@@ -844,12 +899,109 @@ export default function App() {
     [runPlan],
   );
 
-  // ---- the eyes: SigLIP reads the page on pen-up ---------------------------
+  // ---- the eyes: SigLIP reads each figure on pen-up -----------------------
 
   /** The mix the eyes last put on, so a reading that agrees changes nothing. */
   const mixRef = useRef<Mix | null>(null);
+  /** Figures already read, by key; null for one erased down to bare paper. */
+  const seenRef = useRef(new Map<string, Seen | null>());
   const reading = useRef(false);
   const readAgain = useRef(false);
+
+  // ---- Gemini follows: every few seconds it refines what the eyes chose -----
+
+  /**
+   * Gemini's rewrites of the eyes' layers, by label, and its knob settings.
+   * Both outlive the eyes adding or dropping a thing, so a refined layer never
+   * flips back to stock words, and the ink stops nudging knobs Gemini has set.
+   */
+  const wordsRef = useRef(new Map<string, string>());
+  const knobsRef = useRef<{ density: number; brightness: number } | null>(null);
+  /** Bumped by every read; a refine remembers which page it looked at. */
+  const pageVersion = useRef(0);
+  const refinedVersion = useRef(-1);
+  const refining = useRef(false);
+  const refineTimer = useRef<number | undefined>(undefined);
+  const nextRefineAt = useRef(0);
+  const refineError = useRef('');
+  /** Bumped by every reset, so a reply planned before one is dropped. */
+  const refineEpoch = useRef(0);
+
+  const forgetRefinements = () => {
+    refineEpoch.current++;
+    window.clearTimeout(refineTimer.current);
+    refineTimer.current = undefined;
+    wordsRef.current = new Map();
+    knobsRef.current = null;
+    refinedVersion.current = -1;
+  };
+
+  /**
+   * One refine: the selected Gemini model looks at the page and rewrites the
+   * eyes' layers for it, through MODIFY_TRACK and the two live knobs only, so
+   * the eyes keep deciding what is on the page and the two never fight over
+   * the arrangement. A Reimagine arrangement or a pending A/B is left alone.
+   */
+  const refine = useCallback(async () => {
+    const planner = plannerRef.current;
+    const canvas = canvasRef.current;
+    const mix = mixRef.current;
+    if (!followRef.current || !planner || !canvas || canvas.isEmpty() || !mix || isIntro(mix)) return;
+    if (pendingAbRef.current || inFlight.current || !eyesOwn(stateRef.current.tracks, mix)) return;
+    const version = pageVersion.current;
+    if (version === refinedVersion.current) return;
+    const epoch = refineEpoch.current;
+    refining.current = true;
+    nextRefineAt.current = performance.now() + REFINE_EVERY;
+    try {
+      const encodeStart = performance.now();
+      const image = canvas.toDataURL();
+      const encode = performance.now() - encodeStart;
+      const plan = await planner.refine(stateRef.current, image);
+      const now = mixRef.current;
+      if (refineEpoch.current !== epoch || plannerRef.current !== planner) return;
+      if (!now || isIntro(now) || !eyesOwn(stateRef.current.tracks, now)) return;
+      const kept = keepRefinement(plan.actions, stateRef.current.tracks, knobsRef.current ?? stateRef.current.config);
+      kept.words.forEach((prompt, label) => wordsRef.current.set(label, prompt));
+      if (kept.knobs) knobsRef.current = kept.knobs;
+      const { actions } = kept;
+      const changed = [...kept.words].map(([label, prompt]) => `${label}: ${prompt}`);
+      refinedVersion.current = version;
+      refineError.current = '';
+      actions.forEach((action) => dispatch(action));
+      if (changed.length) {
+        pushLog({
+          event: `Gemini: ${changed.join(' · ')}${standIn(plan, plannerModelRef.current)}`,
+          reasoning: plan.reasoning,
+          actions,
+          timings: { ...plan.timings, encode, buffer: bufferRef.current },
+        });
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      // A rate limit or an outage would otherwise come back every few seconds.
+      nextRefineAt.current = performance.now() + REFINE_BACKOFF;
+      // Logged once per kind of failure, not every backoff: only the timing differs.
+      const kind = message.replace(/\d+ms/, '');
+      if (kind !== refineError.current) pushLog({ event: "Gemini couldn't refine the music", error: message });
+      refineError.current = kind;
+    } finally {
+      refining.current = false;
+      if (pageVersion.current !== refinedVersion.current) scheduleRefine();
+    }
+  }, [pushLog]);
+  const refineRef = useRef(refine);
+  refineRef.current = refine;
+
+  /** At most one refine every REFINE_EVERY, and only for a page it hasn't seen. */
+  function scheduleRefine() {
+    if (!followRef.current || refining.current || refineTimer.current !== undefined) return;
+    refineTimer.current = window.setTimeout(() => {
+      refineTimer.current = undefined;
+      void refineRef.current();
+    }, Math.max(0, nextRefineAt.current - performance.now()));
+  }
+  useEffect(() => () => window.clearTimeout(refineTimer.current), []);
 
   /**
    * Pen-up, undo, redo and clear all land here. One reading at a time; strokes
@@ -869,6 +1021,7 @@ export default function App() {
         const canvas = canvasRef.current;
         // A choice on the table owns the mix until the user picks.
         if (!engineRef.current || pendingAbRef.current || !canvas) return;
+        pageVersion.current++;
 
         const startedAt = performance.now();
         const vibe = vibeRef.current;
@@ -877,13 +1030,29 @@ export default function App() {
         let ink: Ink = { coverage: 0, warmth: 0 };
         let reasoning = 'the page is empty';
         if (!canvas.isEmpty()) {
-          const url = canvas.toDataURL();
-          const [vector, page] = await Promise.all([(await loadEyes()).read(url), inkOf(url)]);
-          const reading = readPage(vector, vibe);
-          ink = page;
-          reasoning = [...reading.moods.slice(0, 2), ...reading.instruments.slice(0, 2)]
-            .map((r) => `${r.item.label} ${Math.round(r.p * 100)}%`)
-            .join(' · ');
+          const eyes = await loadEyes();
+          // Only a figure that changed costs a SigLIP pass, which after a
+          // stroke is usually just the one being drawn.
+          const known = new Map<string, Seen | null>();
+          for (const figure of figuresOf(canvas.marks(), canvas.size())) {
+            let seen = seenRef.current.get(figure.key);
+            if (seen === undefined) {
+              const url = canvas.crop(figure.box);
+              const blank = (await inkOf(url)).coverage < 0.002;
+              const image = blank ? null : await eyes.read(url);
+              seen = image && { figure, image, moods: readFigure(eyes.vectors, image) };
+            }
+            known.set(figure.key, seen);
+          }
+          seenRef.current = known;
+          const seen = [...known.values()].filter((s): s is Seen => !!s);
+          const reading = readScene(eyes.vectors, seen, vibe);
+          ink = await inkOf(canvas.toDataURL());
+          const pct = (p: number) => `${Math.round(p * 100)}%`;
+          reasoning = [
+            `saw ${seen.map((s) => `${s.moods[0].item.label} ${pct(s.moods[0].p)}`).join(', ')}`,
+            ...reading.instruments.slice(0, 2).map((r) => `${r.item.label} ${pct(r.p)}`),
+          ].join(' · ');
           next = nextMix(reading, playing, vibe);
         }
         const mix = next ?? playing;
@@ -892,8 +1061,10 @@ export default function App() {
         // reading, so the music grows as the page fills even within one mix.
         // Starting from silence is also when the vibe's tempo and drums go in:
         // a tempo change restarts the band, which would cut into music playing.
+        // Once Gemini has set the knobs they are its to move: it sees the page
+        // every few seconds, colours and line included.
         const config = {
-          ...inkConfig(mix.mood, ink),
+          ...(knobsRef.current ?? inkConfig(feelOf(mix), ink)),
           ...(playing ? {} : { bpm: vibe.bpm, muteDrums: !vibe.drums }),
         };
 
@@ -901,6 +1072,7 @@ export default function App() {
           // Gemini's own knob settings stand until the drawing reads as something new.
           const now = stateRef.current.config;
           if (
+            !knobsRef.current &&
             eyesOwn(stateRef.current.tracks, mix) &&
             (Math.abs(now.density - config.density) >= 0.05 ||
               Math.abs(now.brightness - config.brightness) >= 0.05)
@@ -911,20 +1083,18 @@ export default function App() {
         }
 
         mixRef.current = next;
-        // A vibe's opening is named for the vibe; "Just draw" opens on a fresh page.
-        setScene(isIntro(next) && vibe !== DEFAULT_VIBE ? vibe.name : next.mood.label);
-        // The pen answers a new mood now; the band takes a few seconds to follow.
-        if (!isIntro(next) && next.mood !== playing?.mood) {
-          canvasRef.current?.cue(next.mood.brightness >= 0.5);
-        }
-        const actions = mixActions(next, stateRef.current.backend, config, vibe);
+        // Words for things that left the page go with them.
+        const labels = new Set([...next.moods.map((r) => r.item.label), ...next.instruments.map((i) => i.label)]);
+        wordsRef.current = new Map([...wordsRef.current].filter(([label]) => labels.has(label)));
+        const actions = mixActions(next, stateRef.current.backend, config, vibe, wordsRef.current);
         actions.forEach((action) => dispatch(action));
         pushLog({
-          event: `Feels like ${next.mood.label}: ${next.instruments.map((i) => i.label).join(' and ')}`,
+          event: `Feels like ${titleOf(next)}: ${next.instruments.map((i) => i.label).join(' and ')}`,
           reasoning: `${reasoning} · read in ${Math.round(performance.now() - startedAt)} ms`,
           actions,
         });
       } while (readAgain.current);
+      scheduleRefine();
     } catch (error) {
       pushLog({
         event: "Couldn't read the drawing",
@@ -935,11 +1105,12 @@ export default function App() {
     }
   }, [pushLog]);
 
-  /** Wiping the page lets the band wind down to silence; the next mark brings it back. */
+  /** Wiping the page lets the band wind down to silence, and its channels go with it; the next mark brings it back. */
   const fadeOut = () => {
     previewRef.current?.stop();
     mixRef.current = null;
-    setScene(null);
+    forgetRefinements();
+    dispatch({ type: 'CLEAR_TRACKS' });
     hasPlayed.current = false;
     startNow.current = false;
     autoPaused.current = false;
@@ -958,30 +1129,24 @@ export default function App() {
     setVibe(next);
     save(KEYS.vibe, next.id);
     const opening = introMix(next);
-    const calm = inkConfig(opening.mood, { coverage: 0, warmth: 0 });
+    const calm = inkConfig(feelOf(opening), { coverage: 0, warmth: 0 });
     if (canvasRef.current?.isEmpty() ?? true) {
       fadeOut();
       if (next === DEFAULT_VIBE) return;
       if (!previewRef.current) {
         previewRef.current = new VibePreview(setPreviewing);
-        previewRef.current.setVolume(masterVolumeRef.current);
+        previewRef.current.setVolume(VOLUME);
       }
       void previewRef.current.play(next.id);
-      setScene(next.name);
       mixActions(opening, stateRef.current.backend, calm, next).forEach((action) => dispatch(action));
       return;
     }
     dispatch({ type: 'SET_CONFIG', config: { bpm: next.bpm, muteDrums: !next.drums } });
-    if (autoInterpret) {
-      // The music follows the drawing: hear that drawing in the new style.
-      mixRef.current = null;
-      void readDrawing();
-      return;
-    }
-    mixRef.current = opening;
-    setScene(next.name);
-    startNow.current = true;
-    mixActions(opening, stateRef.current.backend, calm, next).forEach((action) => dispatch(action));
+    // The music follows the drawing: hear that drawing in the new style, with
+    // Gemini's words for the old one forgotten.
+    mixRef.current = null;
+    forgetRefinements();
+    void readDrawing();
   };
 
   // The band has taken over from a preview: let the preview bow out.
@@ -1020,7 +1185,7 @@ export default function App() {
         // play() on the newly audible arm is belt-and-braces: an arm that was
         // steered while the pad was blank never started generating, and play
         // is harmless on one that did (unmute honours the arm's own volume).
-        const audible = masterVolumeRef.current;
+        const audible = VOLUME;
         if (index === 1) {
           engineRef.current?.setMasterVolume(0);
           audition.setMasterVolume(audible);
@@ -1060,7 +1225,7 @@ export default function App() {
         // main and retire the old engine, so the choice lands without a seam.
         const old = engineRef.current;
         engineRef.current = audition;
-        audition.setMasterVolume(masterVolumeRef.current);
+        audition.setMasterVolume(VOLUME);
         bufferRef.current = abBufferRef.current;
         setBuffered(abBufferRef.current);
         setStatus('playing');
@@ -1068,19 +1233,26 @@ export default function App() {
       } else {
         if (audition) void audition.close();
         // The main stream may be muted (B was audible) or on the loser's mix;
-        // restore volume and steer it to the winner, cutting if it was on the
-        // loser. The tracks effect re-sends the same prompts after the
+        // restore volume and steer it to the winner. With two streams it has
+        // played A all along, so only a lone stream left on the other arm
+        // needs the cut. The tracks effect re-sends the same prompts after the
         // dispatches land — harmless.
-        engineRef.current?.setMasterVolume(masterVolumeRef.current);
+        engineRef.current?.setMasterVolume(VOLUME);
         steerEngine(variant.next);
-        if (abAuditionRef.current !== index) engineRef.current?.resetContext();
+        if (!audition && abAuditionRef.current !== index) engineRef.current?.resetContext();
         // Same blank-pad escape hatch as arrival: the winner must be heard.
         if (statusRef.current !== 'playing') {
           hasPlayed.current = true;
           engineRef.current?.play();
         }
       }
-      variant.plan.actions.forEach((action: Action) => dispatch(action));
+      // The stream playing now already runs the winner's tempo and key, and
+      // was already restarted for it, so committing the plan must not restart
+      // it again: that was a silent gap of a few seconds on keep.
+      prevConfig.current = variant.next.config;
+      variant.plan.actions
+        .filter((action) => action.type !== 'RESET_CONTEXT')
+        .forEach((action: Action) => dispatch(action));
 
       pushLog({
         event: `${pending.event} — kept ${index === 0 ? 'A' : 'B'} · ${
@@ -1141,7 +1313,7 @@ export default function App() {
     auditionEngineRef.current = null;
     setAuditionMode('off');
     if (audition) void audition.close();
-    engineRef.current?.setMasterVolume(masterVolumeRef.current);
+    engineRef.current?.setMasterVolume(VOLUME);
     steerEngine(stateRef.current);
     pendingAbRef.current = null;
     setPendingAb(null);
@@ -1171,7 +1343,7 @@ export default function App() {
       setAuditionMode('failed');
       const pending = pendingAbRef.current;
       if (pending) {
-        engineRef.current?.setMasterVolume(masterVolumeRef.current);
+        engineRef.current?.setMasterVolume(VOLUME);
         steerEngine(pending.variants[abAuditionRef.current].next);
         engineRef.current?.resetContext();
       }
@@ -1185,21 +1357,15 @@ export default function App() {
 
   // ---- render --------------------------------------------------------------
 
-  /** One line that says what the instrument is doing right now. */
-  const hearing =
+  /** Only exceptional playback states need words; the transport covers play/pause. */
+  const playbackMessage =
     status === 'connecting'
-      ? 'Starting the band…'
+      ? 'Connecting…'
       : status === 'error'
-        ? 'The band dropped out'
-        : previewing && !playing
-          ? `${vibeById(previewing).name}, a preview`
-          : !connected
-          ? 'Not playing'
-          : thinking
-            ? 'Reimagining…'
-            : status === 'paused'
-              ? 'Paused'
-              : (scene ?? 'Draw anything');
+        ? (hasPlayed.current ? 'The music dropped out' : 'Couldn’t start the music')
+        : playing && !audible
+          ? 'Buffering…'
+          : null;
 
   const togglePlay = () => {
     // During a preview the button is the preview's: it stops it.
@@ -1222,10 +1388,45 @@ export default function App() {
     }
   };
 
+  /** The transport, in the header pill or beside the vibe in the mixer. */
+  const playButton = connected ? (
+    <button
+      type="button"
+      aria-label={playing || previewing ? 'Pause' : 'Play'}
+      title={playing || previewing ? 'Pause' : 'Play'}
+      disabled={status === 'connecting'}
+      onClick={togglePlay}
+      className={cn(
+        'grid size-8 shrink-0 place-items-center rounded-full outline-none transition-colors disabled:pointer-events-none disabled:opacity-40',
+        'focus-visible:ring-2 focus-visible:ring-ring/60 [&_svg]:size-4 [&_svg]:fill-current',
+        playing || previewing ? 'bg-brand text-white' : 'bg-primary text-primary-foreground hover:bg-primary/85',
+      )}
+    >
+      {playing || previewing ? <Pause /> : <Play className="translate-x-px" />}
+    </button>
+  ) : null;
+  const retry = status === 'error' && (
+    <button
+      type="button"
+      onClick={() => void start()}
+      className="shrink-0 text-[13px] font-medium underline underline-offset-2"
+    >
+      Retry
+    </button>
+  );
+  const playbackNotice = playbackMessage ? (
+    <>
+      <span key={playbackMessage} title={statusDetail || undefined} className={cn('min-w-0', FADE_IN)}>
+        {playbackMessage}
+      </span>
+      {retry}
+    </>
+  ) : null;
+
   /** The landing's button is also the gesture that lets the browser start audio. */
   const enterStudio = () => {
     if (!apiKeyRef.current && !demoRef.current) return setKeyDialogOpen(true);
-    setView('studio');
+    go('studio');
     void start();
   };
 
@@ -1237,7 +1438,7 @@ export default function App() {
   const connectKey = (key: string) => {
     commitKey(key);
     setKeyDialogOpen(false);
-    setView('studio');
+    go('studio');
     if (engineRef.current) void stop().then(() => start());
     else void start();
   };
@@ -1250,63 +1451,32 @@ export default function App() {
           <button
             type="button"
             title="About skuzic"
-            onClick={() => setView('landing')}
+            onClick={() => go('landing')}
             className="shrink-0 rounded-full px-2 py-1.5 outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
           >
-            <Wordmark compact />
+            <SkuzicLogo compact />
           </button>
 
-          {/* The mixer at its smallest: always here, whatever is open. */}
+          {/* Keep the same compact transport available when the mixer is closed. */}
           <div className="flex min-w-0 flex-1 justify-center">
-            <div
-              role="status"
-              title={statusDetail || undefined}
-              className="flex h-10 min-w-0 items-center gap-2.5 rounded-full bg-glass pr-4 pl-1 shadow-sm ring-1 ring-border backdrop-blur-xl"
-            >
-              {connected ? (
-                <button
-                  type="button"
-                  aria-label={playing || previewing ? 'Pause' : 'Play'}
-                  title={playing || previewing ? 'Pause' : 'Play'}
-                  onClick={togglePlay}
-                  className={cn(
-                    'grid size-8 shrink-0 place-items-center rounded-full outline-none transition-colors',
-                    'focus-visible:ring-2 focus-visible:ring-ring/60 [&_svg]:size-4 [&_svg]:fill-current',
-                    playing || previewing
-                      ? 'bg-brand text-white'
-                      : 'bg-primary text-primary-foreground hover:bg-primary/85',
-                  )}
-                >
-                  {playing || previewing ? <Pause /> : <Play className="translate-x-px" />}
-                </button>
-              ) : (
-                <span className="grid size-8 shrink-0 place-items-center">
-                  <span className={cn('size-2 rounded-full', DOT[status])} />
-                </span>
-              )}
-              {audible && <Equalizer animated getLevels={getLevels} />}
-              <span className="truncate text-[13px] first-letter:uppercase">{hearing}</span>
-              {status === 'error' && (
-                <button
-                  type="button"
-                  onClick={() => void start()}
-                  className="shrink-0 text-[13px] font-medium underline underline-offset-2"
-                >
-                  Retry
-                </button>
-              )}
-              {connected && (
-                <Slider
-                  className="ml-1 hidden w-20 md:flex"
-                  value={[masterVolume * 100]}
-                  max={100}
-                  step={1}
-                  aria-label="Volume"
-                  title={`Volume ${Math.round(masterVolume * 100)}`}
-                  onValueChange={([v]) => setMasterVolume(v / 100)}
-                />
-              )}
-            </div>
+            {!mixerOpen && (connected || playbackMessage) && (
+              <div
+                role="group"
+                aria-label="Playback"
+                title={statusDetail || undefined}
+                className={cn('flex h-10 min-w-0 items-center gap-2.5 rounded-full bg-glass shadow-sm ring-1 ring-border backdrop-blur-xl', playButton ? 'pr-3 pl-1' : 'px-3')}
+              >
+                {playButton}
+                {playbackNotice ? (
+                  <div role="status" className="flex min-w-0 items-center gap-2 text-[13px]">{playbackNotice}</div>
+                ) : (
+                  <>
+                    <span className="truncate text-[13px]">{vibe.name}</span>
+                    {audible && <Equalizer animated getLevels={getLevels} />}
+                  </>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="flex shrink-0 items-center gap-1">
@@ -1345,11 +1515,10 @@ export default function App() {
           </div>
         </header>
 
-        <div className="flex min-h-0 flex-1 gap-3 px-3 pb-3 sm:px-5 sm:pb-4">
+        <div className="flex min-h-0 flex-1 px-3 pb-3 sm:px-5 sm:pb-4">
           <main className="min-h-0 min-w-0 flex-1">
             <DrawCanvas
               ref={canvasRef}
-              autoInterpret={autoInterpret}
               playing={audible}
               getLevels={getLevels}
               interpretDisabled={!connected || !!pendingAb}
@@ -1385,11 +1554,9 @@ export default function App() {
           <Mixer
             open={mixerOpen}
             onClose={() => showMixer(false)}
-            title={
-              pendingAb
-                ? `version ${abAudition === 0 ? 'A' : 'B'}`
-                : (scene ?? (connected ? 'nothing yet' : 'not playing'))
-            }
+            status={playbackNotice}
+            activity={audible && <Equalizer animated getLevels={getLevels} />}
+            player={playButton}
             // While a choice is pending the mixer mirrors the arm being
             // auditioned, read-only: the committed mix is on hold and showing
             // it here would only mislead.
@@ -1397,19 +1564,14 @@ export default function App() {
             readOnly={!!pendingAb}
             dispatch={dispatch}
             config={state.config}
+            configLocks={state.configLocks}
             capabilities={caps}
             vibe={vibe}
             vibes={VIBES}
             onPickVibe={pickVibe}
-            follow={autoInterpret}
-            onFollowChange={(on) => {
-              setAutoInterpret(on);
-              save(KEYS.autoInterpret, on);
-              // Turning it on should be heard now, not at the next pen-up.
-              if (on) void readDrawing();
-            }}
             canAsk={connected && !thinking && !pendingAb}
             thinking={thinking}
+            askError={planError}
             onAsk={(text) => trigger(text)}
             log={log}
           />
@@ -1461,6 +1623,14 @@ export default function App() {
           setAbTest(on);
           save(KEYS.abTest, on);
         }}
+        follow={follow}
+        onFollowChange={(on) => {
+          setFollow(on);
+          followRef.current = on;
+          save(KEYS.follow, on);
+          if (on) scheduleRefine();
+          else forgetRefinements();
+        }}
         datasetCount={datasetCount}
         onExportDataset={() => void exportDataset()}
         theme={theme}
@@ -1484,6 +1654,8 @@ export default function App() {
           onStart={enterStudio}
           demo={demo}
           returning={connected}
+          theme={theme}
+          onThemeChange={setTheme}
         />
       )}
     </>

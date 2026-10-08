@@ -4,8 +4,9 @@ import * as SliderPrimitive from '@radix-ui/react-slider';
 import { cn } from '@/lib/utils';
 
 /**
- * Colours come from three CSS vars so a caller can tint one slider without a
- * variant explosion: --slider-track, --slider-range, --slider-thumb.
+ * A well whose fill ends in a grip line; size it with a height class. Colours
+ * come from three CSS vars (themed in styles.css) so a caller can tint one
+ * slider without a variant explosion: --slider-track, --slider-range, --slider-thumb.
  */
 function Slider({
   className,
@@ -13,21 +14,11 @@ function Slider({
   value,
   min = 0,
   max = 100,
-  fat = false,
+  'aria-label': ariaLabel,
   ...props
-}: React.ComponentProps<typeof SliderPrimitive.Root> & { fat?: boolean }) {
-  const values = React.useMemo(
-    () => (Array.isArray(value) ? value : Array.isArray(defaultValue) ? defaultValue : [min]),
-    [value, defaultValue, min],
-  );
-
-  // Radix keeps the thumb inside the track, so its centre sits at
-  // `pct% + (0.5 - pct) * thumbSize` — not at a flat `pct%`. Painting the fill
-  // as a gradient to that exact point is the only way the boundary stays hidden
-  // under the thumb at every position instead of peeking out near the ends.
-  const thumb = fat ? 24 : 14;
-  const pct = Math.min(1, Math.max(0, (values[0] - min) / (max - min || 1)));
-  const stop = `calc(${pct * 100}% + ${(0.5 - pct) * thumb}px)`;
+}: React.ComponentProps<typeof SliderPrimitive.Root>) {
+  const [dragging, setDragging] = React.useState(false);
+  const pct = Math.min(1, Math.max(0, ((value ?? defaultValue ?? [min])[0] - min) / (max - min || 1)));
 
   return (
     <SliderPrimitive.Root
@@ -37,26 +28,48 @@ function Slider({
       min={min}
       max={max}
       className={cn(
-        'relative flex w-full touch-none items-center select-none data-disabled:opacity-40',
+        'relative flex h-10 w-full cursor-ew-resize touch-none items-center rounded-md select-none',
+        'has-focus-visible:ring-2 has-focus-visible:ring-ring/60 data-disabled:cursor-default data-disabled:opacity-40',
         className,
       )}
       {...props}
+      onPointerDownCapture={(event) => {
+        if (!props.disabled) setDragging(true);
+        props.onPointerDownCapture?.(event);
+      }}
+      onPointerUpCapture={(event) => {
+        setDragging(false);
+        props.onPointerUpCapture?.(event);
+      }}
+      onPointerCancel={(event) => {
+        setDragging(false);
+        props.onPointerCancel?.(event);
+      }}
+      onLostPointerCapture={(event) => {
+        setDragging(false);
+        props.onLostPointerCapture?.(event);
+      }}
     >
       <SliderPrimitive.Track
         data-slot="slider-track"
-        className={cn('relative grow overflow-hidden rounded-full', fat ? 'h-6' : 'h-1.5')}
-        style={{
-          background: `linear-gradient(to right, var(--slider-range, var(--foreground)) 0 ${stop}, var(--slider-track, var(--muted)) ${stop} 100%)`,
-        }}
-      />
-      <SliderPrimitive.Thumb
-        data-slot="slider-thumb"
-        className={cn(
-          'block shrink-0 rounded-full bg-[var(--slider-thumb,var(--foreground))] outline-none',
-          'transition-shadow focus-visible:ring-2 focus-visible:ring-ring/60',
-          fat ? 'size-6 shadow-[0_1px_4px_rgb(0_0_0/0.3)]' : 'size-3.5',
-        )}
-      />
+        className="relative h-full grow rounded-md border bg-[var(--slider-track)]"
+      >
+        {/* Drawn here instead of by Radix's Range so it never gets narrower than
+            its grip: the knob still reads as a knob at zero. */}
+        <span
+          data-slot="slider-range"
+          className={cn(
+            'absolute inset-y-0.5 left-0.5 rounded-[10px] border bg-[var(--slider-range)] shadow-xs',
+            'after:absolute after:inset-y-[22%] after:right-1.5 after:w-[3px] after:rounded-full after:bg-[var(--slider-thumb)]',
+            // Follow the hand immediately; ease changes coming from the drawing or keyboard.
+            !dragging &&
+              'transition-[width] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none',
+          )}
+          style={{ width: `calc(1rem + (100% - 1rem - 4px) * ${pct})` }}
+        />
+      </SliderPrimitive.Track>
+      {/* What the keyboard and screen readers hold; the grip is what you see. */}
+      <SliderPrimitive.Thumb data-slot="slider-thumb" aria-label={ariaLabel} className="block outline-none" />
     </SliderPrimitive.Root>
   );
 }

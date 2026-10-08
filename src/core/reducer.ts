@@ -1,5 +1,5 @@
 import { CAPABILITIES } from '../audio/engine';
-import type { Action, Backend, SkuzicState, Track } from './types';
+import { CALM, clampTo, type Action, type Backend, type MixConfig, type SkuzicState, type Track } from './types';
 
 /** Lyria has no documented prompt cap; MRT2's engine constant is 6. */
 export const maxTracksFor = (backend: Backend) => CAPABILITIES[backend].maxPrompts;
@@ -94,22 +94,29 @@ export function reduce(state: SkuzicState, action: Action): SkuzicState {
     }
 
     case 'SET_CONFIG': {
-      const c = action.config;
+      // Check at application time: a lock set while Gemini is thinking wins
+      // when its answer arrives. Only direct controls bypass a lock.
+      const c = Object.fromEntries(
+        Object.entries(action.config).filter(
+          ([field]) => action.source === 'user' || state.configLocks[field as keyof MixConfig] !== true,
+        ),
+      ) as Partial<MixConfig>;
+      if (!Object.keys(c).length) return state;
       return {
         ...state,
         config: {
           ...state.config,
           ...c,
-          bpm: c.bpm != null ? Math.min(200, Math.max(60, Math.round(c.bpm))) : state.config.bpm,
+          bpm: c.bpm != null ? clampTo(CALM.bpm, Math.round(c.bpm)) : state.config.bpm,
           density: c.density != null ? clamp01(c.density) : state.config.density,
           brightness: c.brightness != null ? clamp01(c.brightness) : state.config.brightness,
-          guidance:
-            c.guidance != null
-              ? Math.min(6, Math.max(0, c.guidance))
-              : state.config.guidance,
+          guidance: c.guidance != null ? clampTo(CALM.guidance, c.guidance) : state.config.guidance,
         },
       };
     }
+
+    case 'SET_CONFIG_LOCK':
+      return { ...state, configLocks: { ...state.configLocks, [action.field]: action.locked } };
 
     case 'SET_BACKEND': {
       if (action.backend === state.backend) return state;

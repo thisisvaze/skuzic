@@ -1,0 +1,220 @@
+/* Hallmark · component-scope: Settings · existing studio tokens
+ * pre-emit critique: P4 H5 E4 S5 R5 V4 */
+.settings-dialog {
+  width: min(30rem, calc(100vw - 1.5rem));
+  max-height: min(46rem, calc(100dvh - 1.5rem));
+  margin: auto;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) * 1.5);
+  background: var(--popover);
+  color: var(--popover-foreground);
+  color-scheme: light;
+}
+
+.dark .settings-dialog { color-scheme: dark; }
+
+.settings-shell {
+  display: flex;
+  flex-direction: column;
+  max-height: inherit;
+}
+
+.settings-header,
+.settings-footer {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.5rem;
+}
+
+.settings-header h2 {
+  font-family: var(--font-display);
+  font-size: 1.375rem;
+  font-weight: 650;
+  letter-spacing: -0.025em;
+  outline: none;
+}
+
+.settings-close {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 2.75rem;
+  height: 2.75rem;
+  margin-right: -0.5rem;
+  border-radius: var(--radius);
+  color: var(--muted-foreground);
+}
+
+.settings-body {
+  min-height: 0;
+  padding: 0 1.5rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.settings-section {
+  display: grid;
+  gap: 1.25rem;
+  padding: 1.25rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-section:first-child { padding-top: 0.25rem; }
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+}
+
+.settings-row > div { min-width: 0; }
+
+.settings-label,
+.settings-row h3,
+.settings-field > label,
+.settings-appearance legend {
+  display: block;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  font-weight: 600;
+}
+
+.settings-hint {
+  display: block;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+
+.settings-row .settings-hint,
+.settings-label + .settings-hint { margin-top: 0.25rem; }
+
+.settings-field { display: grid; gap: 0.5rem; min-width: 0; }
+.settings-select-trigger {
+  width: 100%;
+  min-width: 0;
+  min-height: 2.75rem;
+  padding: 0.625rem 0.875rem;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) * 0.75);
+  background: var(--input);
+  color: var(--foreground);
+  font: inherit;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+.settings-select-trigger > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.settings-select-content {
+  width: var(--radix-select-trigger-width);
+  max-height: min(18rem, var(--radix-select-content-available-height));
+  border: 1px solid var(--border);
+}
+.settings-select-content [data-radix-select-viewport] {
+  min-width: 0;
+}
+.settings-select-content [data-slot='select-item'] {
+  min-height: 2.75rem;
+  padding-left: 0.75rem;
+  cursor: pointer;
+}
+.settings-select-content [data-highlighted] {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+@media (prefers-reduced-motion: reduce) {
+  .settings-select-content { animation: none; }
+}
+
+.settings-appearance { min-width: 0; }
+.settings-appearance legend { margin-bottom: 0.625rem; }
+.settings-segments {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.25rem;
+  padding: 0.25rem;
+  background: var(--secondary);
+  border-radius: var(--radius);
+}
+.settings-segments label { position: relative; min-width: 0; cursor: pointer; }
+.settings-segments input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+.settings-segments span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  min-height: 2.75rem;
+  border-radius: calc(var(--radius) * 0.75);
+  color: var(--muted-foreground);
+  font-size: 0.8125rem;
+  white-space: nowrap;
+}
+.settings-segments input:checked + span {
+  background: var(--popover);
+  color: var(--foreground);
+}
+
+.settings-disclosure { border-bottom: 1px solid var(--border); }
+.settings-disclosure:last-child { border-bottom: 0; }
+.settings-disclosure summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 0;
+  list-style: none;
+  cursor: pointer;
+}
+.settings-disclosure summary::-webkit-details-marker { display: none; }
+.settings-disclosure summary > svg { flex-shrink: 0; color: var(--muted-foreground); }
+.settings-disclosure[open] summary > svg { transform: rotate(180deg); }
+.settings-disclosure-content { display: grid; gap: 1.25rem; padding: 0.25rem 0 1.5rem; }
+.settings-key { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; }
+.settings-key-suffix { font-variant-numeric: tabular-nums; color: var(--foreground); }
+.settings-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.settings-export,
+.settings-session { display: flex; align-items: center; flex-wrap: wrap; justify-content: space-between; gap: 0.5rem; }
+.settings-session,
+.settings-experiment { padding-top: 1.25rem; border-top: 1px solid var(--border); }
+.settings-export { margin-top: 0.5rem; }
+.settings-link { font-size: 0.8125rem; text-decoration: underline; text-underline-offset: 0.2em; }
+.settings-footer { border-top: 1px solid var(--border); }
+.settings-footer .settings-hint { font-size: 0.75rem; }
+.settings-dialog [data-slot='button'] { min-height: 2.75rem; cursor: pointer; }
+.settings-footer [data-slot='button'] { min-width: 5rem; }
+.settings-dialog [role='switch'] { position: relative; cursor: pointer; }
+.settings-dialog [role='switch']::before { content: ''; position: absolute; inset: -0.625rem -0.125rem; }
+.settings-dialog :is(button, select, summary):focus-visible,
+.settings-segments input:focus-visible + span { outline: 2px solid var(--ring); outline-offset: 2px; }
+.settings-dialog :is(button, select):disabled { opacity: 0.5; cursor: not-allowed; }
+.settings-close:active,
+.settings-segments label:active span { background: var(--accent); }
+
+@media (hover: hover) {
+  .settings-close:hover,
+  .settings-select-trigger:hover { background: var(--secondary); color: var(--foreground); }
+  .settings-disclosure summary:hover .settings-label,
+  .settings-link:hover { color: var(--muted-foreground); }
+  .settings-segments label:hover span { color: var(--foreground); }
+}
+
+@media (max-width: 375px) {
+  .settings-header,
+  .settings-footer { padding-inline: 1rem; }
+  .settings-body { padding-inline: 1rem; }
+  .settings-row { gap: 1rem; }
+}

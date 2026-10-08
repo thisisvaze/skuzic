@@ -1,8 +1,8 @@
-import { GoogleGenAI, MediaResolution, ThinkingLevel } from '@google/genai';
+import { GoogleGenAI, MediaResolution, ThinkingLevel, Type, type Schema } from '@google/genai';
 import { geminiAuth } from '../lib/relay';
 import { CAPABILITIES } from '../audio/engine';
 import { PLAN_SCHEMA, normalize } from '../core/schema';
-import type { Action, SkuzicState } from '../core/types';
+import type { Action, MixConfig, SkuzicState, Track } from '../core/types';
 import {
   DEFAULT_PLANNER_CONFIG,
   PLANNER_CONFIGS,
@@ -22,9 +22,9 @@ export const PLANNER_MODELS = [
 export type PlannerModel = (typeof PLANNER_MODELS)[number]['id'];
 
 /**
- * The better planner by default: SigLIP now reads every pen-up, so Gemini only
- * runs when someone asks it to rethink the page, and a deliberate tap can wait
- * a second longer for a better arrangement.
+ * The better planner by default: SigLIP reacts to every pen-up, so Gemini's
+ * passes (a refine every few seconds while the page changes, a full rethink on
+ * Reimagine) can wait a second longer for better words.
  */
 export const DEFAULT_PLANNER_MODEL: PlannerModel = 'gemini-3.8-flash';
 
@@ -204,6 +204,103 @@ Rules:
   Describing the drawing concretely is what grounds the actions in it. Going
   much beyond this costs real latency for prose nobody reads.`;
 
+/**
+ * The follow-up pass, every few seconds while the page changes. SigLIP names
+ * the page's things in milliseconds, but in stock words: it can't see colour,
+ * line or story, so violet water and blue water sound the same. Gemini sees the
+ * drawing and rewrites those words for it, keeping the mix's shape so the two
+ * readers never pull the arrangement between them. Its own short instruction
+ * and reply shape: under the arranger's, Gemini answered with knob moves only,
+ * leaving every layer's words as they were.
+ */
+const REFINE_INSTRUCTION = `You voice the music for skuzic, a live instrument: someone is drawing, and this
+plays while they do. A fast on-device reader has just set the mix. It names the
+things on the page ("water", "mountains"), gives each a stock mood written
+before anyone drew anything ("flowing and serene"), and picks instruments. It
+cannot see colour, line, style or story: violet water and blue water get the
+same words. You can see the drawing. Make the music belong to this drawing in
+particular by rewriting the words of every layer except Style.
+
+  a thing        its label is what was drawn. Write its mood as this drawing
+                 shows it: what its colours, line and company make you feel.
+  an instrument  its label is the instrument. Keep the instrument and say how
+                 it plays here: register, figure, touch.
+
+Two to six words a layer, the feeling first, and no genre words: the Style layer
+holds the genre, and repeating it makes every drawing sound alike. Keep it
+lovely: never atonal, dissonant, harsh or noisy; a dark or violent page gets
+weight, drive and space instead. Translate the feeling of a thing, not its name.
+Words from an earlier pass, anything more specific than a stock phrase, stay
+unless the drawing has changed past them.
+
+  a sun in pale yellow crayon      sunshine: "soft, hazy and golden"
+  the same sun in thick red marker sunshine: "blazing, bold and urgent"
+  a face in soft grey pencil       face: "tender and wistful"
+                                   felt piano: "felt piano, slow and rubato"
+  rain in dense black scribbles    rain: "heavy, restless and dark"
+                                   harp: "harp, quick falling runs"
+
+Set density from how much is drawn and how busy the line is, and brightness
+from how warm and light the colours are. In reasoning, one sentence of about 20
+words on what this drawing has that the stock words missed.`;
+
+const REFINE_SCHEMA: Schema = {
+  type: Type.OBJECT,
+  properties: {
+    reasoning: { type: Type.STRING, description: 'What this drawing has that the stock words missed.' },
+    layers: {
+      type: Type.ARRAY,
+      description: 'Every layer except Style, with its words for this drawing.',
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          id: { type: Type.STRING, description: 'The track id from the CURRENT MIX.' },
+          words: { type: Type.STRING, description: 'Two to six words, the feeling first.' },
+        },
+        required: ['id', 'words'],
+      },
+    },
+    density: { type: Type.NUMBER, description: '0.0 sparse to 1.0 busy.' },
+    brightness: { type: Type.NUMBER, description: '0.0 dark to 1.0 bright.' },
+  },
+  required: ['reasoning', 'layers', 'density', 'brightness'],
+};
+
+/** The event the follow-up pass sends with the drawing. */
+export const REFINE_EVENT = 'Rewrite every layer except Style for this drawing.';
+
+type Knobs = Pick<MixConfig, 'density' | 'brightness'>;
+
+/**
+ * What a refine pass may change: a layer's words, never the Style layer's, and
+ * the two live knobs, kept in their gentle range. Anything else is dropped, so
+ * Gemini can't restructure the eyes' mix. A target matches by id, or by label
+ * when the eyes rebuilt the tracks while Gemini was thinking.
+ */
+export function keepRefinement(actions: Action[], tracks: Track[], knobs: Knobs) {
+  const find = (target: string) =>
+    tracks.find((t) => t.id === target) ?? tracks.find((t) => t.label.toLowerCase() === target.toLowerCase());
+  const round = (v: number, lo: number, hi: number) => Math.round(Math.min(hi, Math.max(lo, v)) * 100) / 100;
+  const kept: Action[] = [];
+  const words = new Map<string, string>();
+  let next: Knobs | null = null;
+  for (const action of actions) {
+    if (action.type === 'MODIFY_TRACK' && action.prompt) {
+      const track = find(action.target);
+      if (!track || track.label === 'Style' || track.prompt === action.prompt) continue;
+      kept.push({ type: 'MODIFY_TRACK', target: track.id, prompt: action.prompt });
+      words.set(track.label, action.prompt);
+    } else if (action.type === 'SET_CONFIG') {
+      const { density, brightness } = action.config;
+      if (density === undefined && brightness === undefined) continue;
+      const was: Knobs = next ?? knobs;
+      next = { density: round(density ?? was.density, 0.15, 0.85), brightness: round(brightness ?? was.brightness, 0.15, 0.9) };
+    }
+  }
+  if (next) kept.push({ type: 'SET_CONFIG', config: next });
+  return { actions: kept, words, knobs: next };
+}
+
 /** core (shared) + strategy (per config) + mechanics (shared). */
 function systemInstruction(configId: PlannerConfigId): string {
   const config = PLANNER_CONFIGS[configId] ?? PLANNER_CONFIGS[DEFAULT_PLANNER_CONFIG];
@@ -226,6 +323,8 @@ export interface Plan {
   reasoning: string;
   actions: Action[];
   timings: PlanTimings;
+  /** The model that answered: the chosen one, or the other tier when it was out of quota or overloaded. */
+  model: PlannerModel;
 }
 
 /**
@@ -274,11 +373,13 @@ function describeState(state: SkuzicState): string {
   const c = state.config;
   return `${describeCapabilities(state)}
 CURRENT MIX
-tracks: ${state.tracks.length} live (style, mood and one or two instruments)
+tracks: ${state.tracks.length} live (style, a mood for each thing drawn, and one or two instruments)
 ${tracks}
 config: bpm=${c.bpm} density=${c.density.toFixed(2)} brightness=${c.brightness.toFixed(
     2,
-  )} guidance=${c.guidance.toFixed(1)} scale=${c.scale}`;
+  )} guidance=${c.guidance.toFixed(1)} scale=${c.scale} muteDrums=${c.muteDrums} muteBass=${c.muteBass}
+LOCKED CONTROLS: ${Object.entries(state.configLocks).filter(([, locked]) => locked === true).map(([field]) => `${field}=${c[field as keyof MixConfig]}`).join(', ') || 'none'}
+Never change a locked control, even when the event asks for it. The user must unlock it first.`;
 }
 
 /**
@@ -287,66 +388,70 @@ config: bpm=${c.bpm} density=${c.density.toFixed(2)} brightness=${c.brightness.t
  */
 const PLAN_TIMEOUT_MS = 10_000;
 
+type Part = { text: string } | { inlineData: { mimeType: string; data: string } };
+
+/** The drawing, if there is one, then the text: the order the model reads them in. */
+function partsFor(imageDataUrl: string | undefined, text: string): { parts: Part[]; imageBytes: number } {
+  const parts: Part[] = [];
+  let imageBytes = 0;
+  if (imageDataUrl) {
+    const [header, data] = imageDataUrl.split(',');
+    const mimeType = header.match(/data:(.*?);/)?.[1] ?? 'image/png';
+    // base64 decodes to 3 bytes per 4 chars; near enough for a size readout.
+    imageBytes = Math.round((data?.length ?? 0) * 0.75);
+    parts.push({ inlineData: { mimeType, data } });
+  }
+  parts.push({ text });
+  return { parts, imageBytes };
+}
+
 export function createPlanner(apiKey: string, model: PlannerModel = DEFAULT_PLANNER_MODEL) {
   const auth = geminiAuth(apiKey);
   const ai = new GoogleGenAI({
     apiKey: auth.apiKey,
-    // The SDK retries 408/409/429/5XX five times by default, with exponential
-    // backoff that honours retry-after-ms. For a batch job that is right; here
-    // it is actively harmful. A rate limit gets swallowed and re-tried past
-    // PLAN_TIMEOUT_MS, so the failure the user is shown is our own abort with
-    // no status on it — the one error that says nothing about what went wrong.
-    //
-    // One attempt, no retries. A 429 then surfaces as an ApiError we can name,
-    // in under a second instead of over ten. Nothing is lost by not retrying:
-    // this fires on every pause in drawing, so the next stroke *is* the retry,
-    // and it will be planned against a newer canvas than this one anyway.
-    httpOptions: { ...auth.httpOptions, retryOptions: { attempts: 1 } },
+    // No retryOptions. Given any, the SDK wraps fetch in a retry loop whose
+    // failures read "Retryable HTTP Error: <statusText>": no status, none of
+    // Google's message, and over HTTP/2 no status text either, so a spent quota
+    // showed as a blank error. Without them it makes one attempt and a failure
+    // is an ApiError with the status and Google's own words. Nothing is lost by
+    // not retrying: the next stroke or tap is the retry, against a newer page.
+    httpOptions: auth.httpOptions,
   });
 
-  return async function planActions(
-    event: string,
-    state: SkuzicState,
-    imageDataUrl?: string,
-    // Per call rather than baked into the factory, so switching strategy takes
-    // effect on the next tap instead of the next session.
-    configId: PlannerConfigId = DEFAULT_PLANNER_CONFIG,
-  ): Promise<Plan> {
-    const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [];
-    let imageBytes = 0;
-
-    if (imageDataUrl) {
-      const [header, data] = imageDataUrl.split(',');
-      const mimeType = header.match(/data:(.*?);/)?.[1] ?? 'image/png';
-      // base64 decodes to 3 bytes per 4 chars; near enough for a size readout.
-      imageBytes = Math.round((data?.length ?? 0) * 0.75);
-      parts.push({ inlineData: { mimeType, data } });
-    }
-
-    parts.push({ text: `${describeState(state)}\n\nEVENT\n${event}` });
-
+  /** One round trip to one model, with the timeout and the error naming both passes need. */
+  async function once(which: PlannerModel, systemInstruction: string, parts: Part[], responseSchema: Schema) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), PLAN_TIMEOUT_MS);
     const startedAt = performance.now();
-
-    let response;
     try {
-      response = await ai.models.generateContent({
-        model,
+      const response = await ai.models.generateContent({
+        model: which,
         contents: [{ role: 'user', parts }],
         config: {
-          systemInstruction: systemInstruction(configId),
+          systemInstruction,
           responseMimeType: 'application/json',
-          responseSchema: PLAN_SCHEMA,
-          // Latency matters more than depth here — this fires on a button tap.
-          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+          responseSchema,
+          // Latency matters more than depth here. On 2026-10-07 Flash Lite took
+          // 8-20 s at LOW, past the timeout, and 0.5-1 s at MINIMAL.
+          thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
           // A rough sketch only has to read as a *shape*; 64 image tokens is
           // plenty for that and cuts the prefill against MEDIUM's 256.
           mediaResolution: MediaResolution.MEDIA_RESOLUTION_LOW,
           abortSignal: controller.signal,
         },
       });
+      const text = response.text;
+      if (!text) throw new Error('Planner returned no content');
+      const usage = response.usageMetadata;
+      return {
+        parsed: JSON.parse(text) as Record<string, unknown>,
+        request: performance.now() - startedAt,
+        promptTokens: usage?.promptTokenCount,
+        outputTokens: usage?.candidatesTokenCount,
+        thoughtTokens: usage?.thoughtsTokenCount,
+      };
     } catch (error) {
+      if (error instanceof Error && error.message === 'Planner returned no content') throw error;
       // An abort and a rejected request are different failures, but the abort
       // wins the race and used to overwrite the reason — a rate limit the SDK
       // was quietly retrying reported as a plain hang, which is indistinguishable
@@ -382,37 +487,71 @@ export function createPlanner(apiKey: string, model: PlannerModel = DEFAULT_PLAN
       const status = typeof raw === 'number' && raw >= 100 && raw <= 599 ? raw : undefined;
 
       if (status !== undefined) {
-        const hint =
-          status === 429
-            ? ' — rate limited, slow the request rate'
-            : status === 503
-              ? ' — model overloaded, retry shortly'
-              : '';
-        throw new Error(`Planner failed: HTTP ${status} after ${elapsed}ms${hint}${detail}`);
+        // An ApiError's message is Google's JSON body; its own sentence is the useful part.
+        let said = message;
+        try {
+          said = (JSON.parse(message) as { error?: { message?: string } }).error?.message ?? message;
+        } catch {
+          // Not JSON: keep it as it came.
+        }
+        const hint = status === 429 ? ' — out of quota or rate limited' : status === 503 ? ' — model overloaded' : '';
+        const first = said.split(/(?<=\.)\s/)[0];
+        throw Object.assign(new Error(`Planner failed: HTTP ${status} after ${elapsed}ms${hint}${first ? ` — ${first}` : ''}`), {
+          status,
+        });
       }
       throw new Error(`Planner failed after ${elapsed}ms${detail || ' — see the console'}`);
     } finally {
       clearTimeout(timer);
     }
+  }
 
-    const request = performance.now() - startedAt;
-    const usage = response.usageMetadata;
+  /** The chosen model, or once the other tier when it is out of quota or overloaded. */
+  async function ask(systemInstruction: string, parts: Part[], responseSchema: Schema) {
+    try {
+      return { ...(await once(model, systemInstruction, parts, responseSchema)), model };
+    } catch (error) {
+      const status = (error as { status?: number }).status;
+      if (status !== 429 && status !== 503) throw error;
+      const other = PLANNER_MODELS.find((m) => m.id !== model)!.id;
+      return { ...(await once(other, systemInstruction, parts, responseSchema)), model: other };
+    }
+  }
 
-    const text = response.text;
-    if (!text) throw new Error('Planner returned no content');
-
-    const parsed = JSON.parse(text) as { reasoning?: string; actions?: unknown[] };
+  async function planActions(
+    event: string,
+    state: SkuzicState,
+    imageDataUrl?: string,
+    // Per call rather than baked into the factory, so switching strategy takes
+    // effect on the next tap instead of the next session.
+    configId: PlannerConfigId = DEFAULT_PLANNER_CONFIG,
+  ): Promise<Plan> {
+    const { parts, imageBytes } = partsFor(imageDataUrl, `${describeState(state)}\n\nEVENT\n${event}`);
+    const { parsed, request, model: answered, ...usage } = await ask(systemInstruction(configId), parts, PLAN_SCHEMA);
     return {
-      reasoning: parsed.reasoning ?? '',
+      reasoning: (parsed.reasoning as string) ?? '',
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      actions: normalize((parsed.actions ?? []) as any[], event),
-      timings: {
-        request,
-        imageBytes,
-        promptTokens: usage?.promptTokenCount,
-        outputTokens: usage?.candidatesTokenCount,
-        thoughtTokens: usage?.thoughtsTokenCount,
-      },
+      actions: normalize(((parsed.actions as unknown[]) ?? []) as any[], event),
+      timings: { request, imageBytes, ...usage },
+      model: answered,
     };
-  };
+  }
+
+  /**
+   * The follow-up pass: every layer but Style rewritten for the drawing, and
+   * the two live knobs, as actions for keepRefinement to vet.
+   */
+  async function refine(state: SkuzicState, imageDataUrl: string): Promise<Plan> {
+    const { parts, imageBytes } = partsFor(imageDataUrl, `${describeState(state)}\n\nEVENT\n${REFINE_EVENT}`);
+    const { parsed, request, model: answered, ...usage } = await ask(REFINE_INSTRUCTION, parts, REFINE_SCHEMA);
+    const layers = (parsed.layers as { id?: string; words?: string }[] | undefined) ?? [];
+    const { density, brightness } = parsed as { density?: number; brightness?: number };
+    const actions: Action[] = layers.flatMap((l) =>
+      l.id && l.words ? [{ type: 'MODIFY_TRACK' as const, target: l.id, prompt: l.words }] : [],
+    );
+    if (density != null || brightness != null) actions.push({ type: 'SET_CONFIG', config: { density, brightness } });
+    return { reasoning: (parsed.reasoning as string) ?? '', actions, timings: { request, imageBytes, ...usage }, model: answered };
+  }
+
+  return Object.assign(planActions, { refine });
 }

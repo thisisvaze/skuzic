@@ -1,0 +1,9 @@
+/* Landing layout tokens extend the existing paper, ink and watercolor palette. */
+.landing {
+  --space-experiment-small: 0.5rem;
+  --space-experiment-gap: clamp(1.25rem, 3svh, 2.5rem);
+  --text-experiment-display: clamp(2.5rem, 4.8vw, 4rem);
+  --text-experiment-body: clamp(1rem, 1.4vw, 1.125rem);
+  --text-experiment-small: 0.8125rem;
+  --color-experiment-rule: color-mix(in oklch, var(--color-ink) 7%, transparent);
+}

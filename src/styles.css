@@ -29,6 +29,10 @@
   --live: oklch(0.62 0.15 155);
   --warn: oklch(0.7 0.14 75);
   --glass: oklch(1 0 0 / 0.74);
+  /* Sliders: a raised fill in a sunk well. The track rack tints these per sound. */
+  --slider-track: oklch(0.915 0.006 270);
+  --slider-range: oklch(1 0 0);
+  --slider-thumb: oklch(0.5 0.012 270 / 0.55);
 }
 
 .dark {
@@ -54,6 +58,9 @@
   --live: oklch(0.8 0.15 155);
   --warn: oklch(0.82 0.13 80);
   --glass: oklch(0.23 0.007 270 / 0.74);
+  --slider-track: oklch(0.2 0.006 270);
+  --slider-range: oklch(0.36 0.008 270);
+  --slider-thumb: oklch(0.96 0.003 270 / 0.45);
 }
 
 @theme inline {
@@ -86,103 +93,12 @@
   --color-brand-1: #e2711d;
   --color-brand-2: #e26d9e;
   --color-brand-3: #7c3aed;
-  --font-display: 'Bricolage Grotesque', ui-sans-serif, system-ui, sans-serif;
+  --font-sans: 'Host Grotesk', ui-sans-serif, system-ui, sans-serif;
+  --font-display: 'Host Grotesk', ui-sans-serif, system-ui, sans-serif;
   --radius-sm: calc(var(--radius) - 8px);
   --radius-md: calc(var(--radius) - 4px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
-  --animate-eq: eq 800ms ease-in-out infinite alternate;
-}
-
-/* Equalizer bars on the interpret button. `alternate` gives the bounce without
-   a mirrored second half in the keyframes. */
-@keyframes eq {
-  from {
-    transform: scaleY(0.28);
-  }
-  to {
-    transform: scaleY(1);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .animate-eq {
-    animation: none;
-    transform: scaleY(0.6);
-  }
-}
-
-/* Landing demo: a sun, then waves, then a heart draw themselves while the chip
-   names what the band hears. Paths use pathLength="1", so a dash of 1 is the
-   whole stroke whatever its real length. */
-.doodle path {
-  stroke-dasharray: 1;
-  stroke-dashoffset: 1;
-}
-/* Full shorthands, each with its name: the minifier turns a nameless
-   `animation: 12s …` into `animation: none`, which drops the duration. */
-.doodle-sun path {
-  animation: draw-sun 12s ease-in-out infinite;
-}
-.doodle-water path {
-  animation: draw-water 12s ease-in-out infinite;
-}
-.doodle-love path {
-  animation: draw-love 12s ease-in-out infinite;
-}
-.hearing-sun {
-  animation: say-sun 12s infinite;
-}
-.hearing-water {
-  animation: say-water 12s infinite;
-}
-.hearing-love {
-  animation: say-love 12s infinite;
-}
-@keyframes draw-sun {
-  0% { stroke-dashoffset: 1; opacity: 1; }
-  14%, 88% { stroke-dashoffset: 0; opacity: 1; }
-  96%, 100% { stroke-dashoffset: 0; opacity: 0; }
-}
-@keyframes draw-water {
-  0%, 30% { stroke-dashoffset: 1; opacity: 1; }
-  46%, 88% { stroke-dashoffset: 0; opacity: 1; }
-  96%, 100% { stroke-dashoffset: 0; opacity: 0; }
-}
-@keyframes draw-love {
-  0%, 60% { stroke-dashoffset: 1; opacity: 1; }
-  72%, 88% { stroke-dashoffset: 0; opacity: 1; }
-  96%, 100% { stroke-dashoffset: 0; opacity: 0; }
-}
-@keyframes say-sun {
-  0%, 6% { opacity: 0; transform: translateY(6px); }
-  10%, 30% { opacity: 1; transform: none; }
-  34%, 100% { opacity: 0; transform: translateY(-6px); }
-}
-@keyframes say-water {
-  0%, 32% { opacity: 0; transform: translateY(6px); }
-  36%, 60% { opacity: 1; transform: none; }
-  64%, 100% { opacity: 0; transform: translateY(-6px); }
-}
-@keyframes say-love {
-  0%, 62% { opacity: 0; transform: translateY(6px); }
-  66%, 92% { opacity: 1; transform: none; }
-  96%, 100% { opacity: 0; transform: translateY(-6px); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .doodle path {
-    animation: none;
-    stroke-dashoffset: 0;
-  }
-  .hearing-sun,
-  .hearing-water {
-    animation: none;
-    opacity: 0;
-  }
-  .hearing-love {
-    animation: none;
-    opacity: 1;
-  }
 }
 
 @layer base {
@@ -221,15 +137,237 @@
 @utility bg-brand {
   background-image: linear-gradient(120deg, var(--color-brand-1), var(--color-brand-2) 50%, var(--color-brand-3));
 }
-@utility text-brand {
-  background-image: linear-gradient(90deg, var(--color-brand-1), var(--color-brand-2) 55%, var(--color-brand-3));
-  background-clip: text;
-  color: transparent;
-}
 
 /* Native modal for settings: the browser handles focus, Escape and the top
    layer, so nothing here re-implements them. */
 dialog::backdrop {
   background: oklch(0.15 0.01 270 / 0.4);
   backdrop-filter: blur(6px);
+}
+
+/* The landing: coloured pencil on paper, with a dark paper palette in landing.css.
+   Colour lives in the drawing and the blue watercolor action. */
+@font-face {
+  font-family: 'Libre Franklin';
+  src: url('/fonts/libre-franklin.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@theme {
+  --color-ink: #2a2621;
+  --color-ink-soft: #5f5850;
+  --color-watercolor-blue: #2468ad;
+  --color-chrome: #f2b705;
+  --spacing-gutter: clamp(1.25rem, 4vw, 2.5rem);
+}
+
+.landing {
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: 'Libre Franklin', ui-sans-serif, system-ui, sans-serif;
+  font-synthesis: none;
+  caret-color: var(--color-watercolor-blue);
+  scrollbar-color: var(--color-ink-soft) var(--color-paper);
+  scroll-behavior: smooth;
+
+  & ::selection {
+    background: var(--color-chrome);
+    color: var(--color-ink);
+  }
+  & a {
+    text-decoration-thickness: 2px;
+    text-underline-offset: 0.2em;
+  }
+  & :focus-visible {
+    outline: 3px solid var(--color-ink);
+    outline-offset: 4px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .landing {
+    scroll-behavior: auto;
+  }
+}
+
+/* The studio's paper tooth (set as --grain by Landing), so every line drawn on
+   the page reads as coloured pencil. */
+.pencil {
+  -webkit-mask-image: var(--grain);
+  mask-image: var(--grain);
+  -webkit-mask-size: 256px;
+  mask-size: 256px;
+}
+.pencil path {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* The wall takes the pen wherever the words don't. With a mouse you draw
+   straight through the words as well; on touch, the words are where you scroll.
+   The cursor is a quiet ring in the page's ink, hollow so the line can be seen
+   leaving the nib. */
+.wall {
+  cursor:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'%3E%3Ccircle cx='10' cy='10' r='6' fill='none' stroke='%232a2621' stroke-opacity='.5' stroke-width='1.5'/%3E%3C/svg%3E")
+      10 10,
+    crosshair;
+  touch-action: none;
+}
+.dark .wall {
+  cursor:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'%3E%3Ccircle cx='10' cy='10' r='6' fill='none' stroke='%23f1efe9' stroke-opacity='.55' stroke-width='1.5'/%3E%3C/svg%3E")
+      10 10,
+    crosshair;
+}
+@media (pointer: fine) {
+  .landing-pass {
+    pointer-events: none;
+  }
+  .landing-pass :is(a, button) {
+    pointer-events: auto;
+  }
+}
+
+/* The top bar's blur (Landing's Header) comes in over the first few px of
+   scroll, so the wall at rest stays crisp to the edge. Opacity goes on each
+   layer: on a parent it would cut the blur off from the page behind. Without
+   scroll timelines the blur simply stays on. */
+@supports (animation-timeline: scroll()) {
+  .frost > * {
+    animation: frost linear both;
+    animation-timeline: scroll();
+    animation-range: 0 4rem;
+  }
+}
+@keyframes frost {
+  from {
+    opacity: 0;
+  }
+}
+
+/* Drawn marks rest finished; with motion allowed they draw themselves instead.
+   pathLength="1" on each path makes a dash of 1 the whole line. */
+.ghost {
+  transition: opacity 400ms;
+}
+.ghost[data-gone] {
+  opacity: 0;
+}
+.ghost-line {
+  stroke-width: 5;
+  stroke-dasharray: 1 2;
+  opacity: 0.8;
+}
+.ghost-nib {
+  stroke-width: 12;
+  stroke-dasharray: 0 2;
+  /* Just short of the end: a zero-length dash exactly on it doesn't render. */
+  stroke-dashoffset: -0.998;
+}
+.underline-draw path {
+  stroke-width: 4;
+  stroke-dasharray: 1 2;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  /* A pencil scribbles on the open wall, lifts, and comes back until the
+     visitor draws. Both paths share one clock, so the line grows behind the nib. */
+  .ghost path {
+    animation-duration: 7s;
+    animation-timing-function: cubic-bezier(0.37, 0, 0.63, 1);
+    animation-delay: 1.4s;
+    animation-iteration-count: infinite;
+    animation-fill-mode: both;
+  }
+  .ghost[data-gone] path {
+    animation-play-state: paused;
+  }
+  .ghost-line {
+    animation-name: ghost-line;
+  }
+  .ghost-nib {
+    animation-name: ghost-nib;
+  }
+  .underline-draw path {
+    animation: draw 600ms cubic-bezier(0.65, 0, 0.35, 1) 500ms both;
+  }
+  .underline-draw path + path {
+    animation-delay: 1000ms;
+    animation-duration: 450ms;
+  }
+}
+@keyframes draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes ghost-line {
+  0%,
+  4% {
+    stroke-dashoffset: 1;
+    opacity: 0.8;
+  }
+  40%,
+  70% {
+    stroke-dashoffset: 0;
+    opacity: 0.8;
+  }
+  84%,
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0;
+  }
+}
+@keyframes ghost-nib {
+  0% {
+    stroke-dashoffset: 0;
+    opacity: 0;
+  }
+  4% {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+  40% {
+    stroke-dashoffset: -0.998;
+    opacity: 1;
+  }
+  48%,
+  100% {
+    stroke-dashoffset: -0.998;
+    opacity: 0;
+  }
+}
+
+/* Gemini at work: a soft light sweeps across the words, the way Apple's own
+   thinking text does. Under reduced motion the words just rest, muted. */
+.shimmer {
+  background: linear-gradient(
+      100deg,
+      var(--muted-foreground) 38%,
+      var(--foreground) 50%,
+      var(--muted-foreground) 62%
+    )
+    0 0 / 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .shimmer {
+    animation: shimmer 1.9s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  }
+}
+@keyframes shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0 0;
+  }
 }

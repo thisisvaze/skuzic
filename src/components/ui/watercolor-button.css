@@ -1,0 +1,116 @@
+.watercolor-button {
+  position: relative;
+  isolation: isolate;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  min-height: 3.5rem;
+  padding: 1.125rem 2rem;
+  border: 0;
+  border-radius: 1rem;
+  corner-shape: superellipse(2);
+  overflow: hidden;
+  background: #2468ad;
+  color: #fff;
+  font-family: inherit;
+  font-size: 1.125rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  box-shadow: 0 2px 4px rgb(32 77 119 / 8%);
+}
+
+.watercolor-button__paint {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.watercolor-button__bloom {
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: center;
+  transform: scale(0.35, 0.55);
+}
+
+.watercolor-button__bloom--second {
+  transform: scale(0.25, 0.4) rotate(-8deg);
+}
+
+.watercolor-button__grain {
+  opacity: 0.32;
+  mix-blend-mode: soft-light;
+}
+
+.watercolor-button__label {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  pointer-events: none;
+}
+
+.watercolor-button:focus-visible {
+  outline: 3px solid #205b94;
+  outline-offset: 5px;
+}
+
+.watercolor-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .watercolor-button {
+    transition: transform 450ms cubic-bezier(0.16, 1, 0.3, 1), box-shadow 450ms ease;
+  }
+
+  .watercolor-button__bloom {
+    transition: opacity 400ms ease, transform 900ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .watercolor-button__bloom--second {
+    transition-duration: 500ms, 1200ms;
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .watercolor-button:not(:disabled):hover {
+      box-shadow: 0 3px 7px rgb(32 77 119 / 10%);
+    }
+
+    .watercolor-button:not(:disabled):hover .watercolor-button__bloom--first {
+      opacity: 1;
+      transform: scale(1.18, 1.1) rotate(4deg);
+    }
+
+    .watercolor-button:not(:disabled):hover .watercolor-button__bloom--second {
+      opacity: 0.85;
+      transform: scale(1.2, 1.15) rotate(3deg);
+      transition-delay: 90ms;
+    }
+  }
+
+  .watercolor-button:not(:disabled):active {
+    transform: translateY(0) scale(0.985);
+    box-shadow: 0 1px 2px rgb(32 77 119 / 8%);
+    transition-duration: 120ms;
+  }
+}
+
+@media (forced-colors: active) {
+  .watercolor-button {
+    border: 1px solid ButtonText;
+    background: ButtonFace;
+    color: ButtonText;
+  }
+
+  .watercolor-button__paint {
+    display: none;
+  }
+}

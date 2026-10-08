@@ -58,7 +58,7 @@ export class MagentaEngine implements MusicEngine {
     this.setStatus('connecting');
 
     this.scheduler = new PcmScheduler(this.masterVolume);
-    await this.scheduler.resume();
+    this.scheduler.resume();
 
     await new Promise<void>((resolve, reject) => {
       const socket = new WebSocket(this.url);
@@ -143,7 +143,7 @@ export class MagentaEngine implements MusicEngine {
     // Same as the Lyria path: connect() runs on page load, where the browser
     // refuses to start a context, so the gesture that reaches play() is the
     // first moment audio can actually be unblocked.
-    void this.scheduler?.resume();
+    this.scheduler?.resume();
     this.scheduler?.unmute();
     this.send({ type: 'play' });
     this.setStatus('playing');

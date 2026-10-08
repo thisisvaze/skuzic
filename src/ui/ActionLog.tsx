@@ -69,6 +69,8 @@ function summarize(action: Action): string {
         .join(' · ');
     case 'SET_BACKEND':
       return `engine: ${action.backend}`;
+    case 'SET_CONFIG_LOCK':
+      return action.locked ? 'locked a control' : 'unlocked a control';
     case 'CLEAR_TRACKS':
       return 'new mix';
     case 'RESET_CONTEXT':

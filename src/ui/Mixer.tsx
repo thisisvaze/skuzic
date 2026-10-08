@@ -1,23 +1,20 @@
-import { useState, type ReactNode } from 'react';
+import { useId, useRef, useState, type ReactNode } from 'react';
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { Scale } from '@google/genai';
-import { ArrowUp, ChevronDown, Drum, Guitar, X } from 'lucide-react';
+import NumberFlow, { type Format } from '@number-flow/react';
+import { ArrowUp, ChevronDown, Drum, Guitar, Lock, LockOpen, X } from 'lucide-react';
 
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Slider } from '@/components/ui/slider';
-import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
 import type { EngineCapabilities } from '../audio/engine';
-import type { Action, MixConfig, Track } from '../core/types';
+import { CALM, type Action, type ConfigLocks, type MixConfig, type Track } from '../core/types';
 import type { Vibe } from '../vision/eyes';
 import { ActionLog, type LogEntry } from './ActionLog';
 import { TrackRack } from './TrackRack';
 import { VibePicker } from './VibePicker';
+import { MIXER_EASE, MixerReveal } from './mixer-motion';
+import './mixer.css';
 
 const SCALE_LABELS: Record<string, string> = {
   [Scale.SCALE_UNSPECIFIED]: 'Any key',
@@ -38,23 +35,51 @@ const SCALE_LABELS: Record<string, string> = {
 interface Props {
   open: boolean;
   onClose: () => void;
-  /** What the band is playing, or what it's doing instead. */
-  title: string;
+  /** Connection progress or an error; ordinary playback needs no status text. */
+  status: ReactNode;
+  /** The neutral audio meter beside the vibe name, only while audible. */
+  activity: ReactNode;
+  /** Play/pause lives with the selected vibe. */
+  player: ReactNode;
   tracks: Track[];
   /** While an A/B choice is on the table the mix shown is a candidate, not yours to edit. */
   readOnly: boolean;
   dispatch: (action: Action) => void;
   config: MixConfig;
+  configLocks: ConfigLocks;
   capabilities: EngineCapabilities;
   vibe: Vibe;
   vibes: Vibe[];
   onPickVibe: (vibe: Vibe) => void;
-  follow: boolean;
-  onFollowChange: (on: boolean) => void;
   canAsk: boolean;
   thinking: boolean;
+  /** Why the last ask got no answer, if it didn't. */
+  askError?: string | null;
   onAsk: (text: string) => void;
   log: LogEntry[];
+}
+
+/** Apple's quiet ease-out: quick to start, long to settle. */
+const SETTLE = 'ease-[cubic-bezier(0.22,1,0.36,1)]';
+
+/** A line that fades and folds in and out, keeping its last words while it goes. */
+function FadeLine({ text, className }: { text: string | null | undefined; className?: string }) {
+  const last = useRef(text);
+  if (text) last.current = text;
+  return (
+    <div
+      aria-hidden={!text}
+      className={cn(
+        'grid transition-[grid-template-rows,opacity] duration-300 motion-reduce:transition-none',
+        SETTLE,
+        text ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0',
+      )}
+    >
+      <p role={text ? 'alert' : undefined} className={cn('overflow-hidden', className)}>
+        {last.current}
+      </p>
+    </div>
+  );
 }
 
 function Heading({ children, aside }: { children: ReactNode; aside?: ReactNode }) {
@@ -66,37 +91,53 @@ function Heading({ children, aside }: { children: ReactNode; aside?: ReactNode }
   );
 }
 
-/** A knob with its two ends named, so moving it says what it does. */
+/** A knob on its own card, with its two ends named so moving it says what it does. */
 function Range({
   label,
   low,
   high,
   value,
-  display,
+  format,
+  suffix,
   min = 0,
   max = 1,
   step = 0.01,
   hint,
   onChange,
+  lockControl,
+  disabled,
 }: {
   label: string;
   low: string;
   high: string;
   value: number;
-  display: string;
+  /** How the readout writes the value; it rolls from one to the next. */
+  format: Format;
+  suffix?: string;
   min?: number;
   max?: number;
   step?: number;
   hint: string;
   onChange: (v: number) => void;
+  lockControl: ReactNode;
+  disabled: boolean;
 }) {
   return (
-    <div className="flex flex-col gap-2" title={hint}>
-      <div className="flex items-baseline justify-between text-[13px]">
+    <div className="flex flex-col gap-2 rounded-2xl bg-card p-4" title={hint}>
+      <div className="flex items-center justify-between gap-2 text-[13px]">
         <span className="font-medium">{label}</span>
-        <span className="text-[12px] text-muted-foreground tabular-nums">{display}</span>
+        <div className="flex items-center gap-1">
+          <NumberFlow
+            value={value}
+            format={format}
+            suffix={suffix}
+            className="text-[12px] text-muted-foreground tabular-nums"
+          />
+          {lockControl}
+        </div>
       </div>
       <Slider
+        disabled={disabled}
         value={[value]}
         min={min}
         max={max}
@@ -109,6 +150,28 @@ function Range({
         <span>{high}</span>
       </div>
     </div>
+  );
+}
+
+function ControlLock({ label, locked, onChange }: { label: string; locked: boolean; onChange: () => void }) {
+  return (
+    <button
+      type="button"
+      aria-label={`${locked ? 'Unlock' : 'Lock'} ${label}`}
+      aria-pressed={locked}
+      title={
+        locked
+          ? `${label} is locked. You can still adjust it manually.`
+          : `Keep ${label.toLowerCase()} fixed as the music changes`
+      }
+      onClick={onChange}
+      className={cn(
+        'grid size-7 shrink-0 place-items-center rounded-full outline-none transition-colors hover:bg-secondary focus-visible:ring-2 focus-visible:ring-ring/60 disabled:opacity-40',
+        locked ? 'bg-secondary text-foreground' : 'text-muted-foreground/60 hover:text-foreground',
+      )}
+    >
+      {locked ? <Lock className="size-3.5" aria-hidden="true" /> : <LockOpen className="size-3.5" aria-hidden="true" />}
+    </button>
   );
 }
 
@@ -129,11 +192,11 @@ function Chip({
       aria-pressed={on}
       onClick={() => onChange(!on)}
       className={cn(
-        'flex h-9 items-center gap-2 rounded-full px-3.5 text-[13px] outline-none transition-colors',
-        'focus-visible:ring-2 focus-visible:ring-ring/60 [&_svg]:size-4',
+        'flex h-11 w-full min-w-0 items-center justify-center gap-1.5 rounded-xl px-2 text-[13px] outline-none transition-colors',
+        'focus-visible:ring-2 focus-visible:ring-ring/60 [&_svg]:size-4 [&_svg]:shrink-0',
         on
           ? 'bg-primary text-primary-foreground'
-          : 'bg-secondary text-muted-foreground line-through decoration-1 hover:text-foreground',
+          : 'bg-card text-muted-foreground hover:bg-secondary hover:text-foreground',
       )}
     >
       {icon}
@@ -142,125 +205,162 @@ function Chip({
   );
 }
 
-function Feel({
+/** Every knob past the sounds, folded under one heading: the drawing and Gemini set them as it goes. */
+function Advanced({
   config,
+  configLocks,
+  readOnly,
   capabilities: caps,
   dispatch,
 }: {
   config: MixConfig;
+  configLocks: ConfigLocks;
+  readOnly: boolean;
   capabilities: EngineCapabilities;
   dispatch: (action: Action) => void;
 }) {
-  const set = (patch: Partial<MixConfig>) => dispatch({ type: 'SET_CONFIG', config: patch });
-  const more = caps.bpm || caps.scale || caps.guidance;
+  const set = (patch: Partial<MixConfig>) => dispatch({ type: 'SET_CONFIG', config: patch, source: 'user' });
+  const lock = (field: keyof MixConfig, label: string) => (
+    <ControlLock
+      label={label}
+      locked={configLocks[field] === true}
+      onChange={() => dispatch({ type: 'SET_CONFIG_LOCK', field, locked: !configLocks[field] })}
+    />
+  );
+  const [open, setOpen] = useState(false);
+  const id = useId();
 
   return (
     <section>
-      <Heading>Feel</Heading>
-      <div className="flex flex-col gap-5 rounded-2xl bg-card p-4">
-        {caps.density && (
-          <Range
-            label="Energy"
-            low="Calm"
-            high="Busy"
-            value={config.density}
-            display={`${Math.round(config.density * 100)}%`}
-            hint="How many notes and beats the band plays"
-            onChange={(density) => set({ density })}
-          />
-        )}
-        {caps.brightness && (
-          <Range
-            label="Brightness"
-            low="Dark"
-            high="Bright"
-            value={config.brightness}
-            display={`${Math.round(config.brightness * 100)}%`}
-            hint="Warm and muffled, or crisp and sparkly"
-            onChange={(brightness) => set({ brightness })}
-          />
-        )}
-        {!caps.density && (
-          <p className="text-[12px] leading-snug text-muted-foreground">
-            Magenta has fewer knobs than Lyria: no energy, brightness, tempo or key.
-          </p>
-        )}
-        {(caps.muteDrums || caps.muteBass) && (
-          <div className="flex flex-wrap gap-2">
-            {caps.muteDrums && (
-              <Chip on={!config.muteDrums} onChange={(on) => set({ muteDrums: !on })} icon={<Drum />}>
-                Drums
-              </Chip>
-            )}
-            {caps.muteBass && (
-              <Chip on={!config.muteBass} onChange={(on) => set({ muteBass: !on })} icon={<Guitar />}>
-                Bass
-              </Chip>
-            )}
-          </div>
-        )}
-
-        {more && (
-          <details className="group -mx-1">
-            <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-lg px-1 py-1 text-[13px] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60">
-              <ChevronDown className="size-4 transition-transform group-open:rotate-180" />
-              {caps.bpm ? 'Tempo, key and more' : 'More'}
-            </summary>
-            <div className="flex flex-col gap-5 px-1 pt-4">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={id}
+        onClick={() => setOpen(!open)}
+        className="flex cursor-pointer items-center gap-1 rounded-lg px-1 py-1 text-[12px] font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
+      >
+        Advanced
+        <ChevronDown
+          className={cn(
+            'size-3.5 transition-transform duration-300 motion-reduce:transition-none',
+            open && 'rotate-180',
+          )}
+        />
+      </button>
+      <AnimatePresence initial={false}>
+        {open && (
+          <MixerReveal id={id} className="pt-1.5">
+            <fieldset disabled={readOnly} className="flex min-w-0 flex-col gap-2">
+              <p className="px-1 pb-1 text-[12px] text-muted-foreground">Lock a control to keep it as you draw.</p>
+              {!caps.density && (
+                <p className="px-1 text-[12px] leading-snug text-muted-foreground">
+                  Magenta has fewer knobs than Lyria: no energy, brightness, tempo or key.
+                </p>
+              )}
+              {caps.density && (
+                <Range
+                  label="Energy"
+                  lockControl={lock('density', 'Energy')}
+                  disabled={readOnly}
+                  low="Still"
+                  high="Flowing"
+                  value={config.density}
+                  format={{ style: 'percent' }}
+                  hint="How many notes and beats the music plays"
+                  onChange={(density) => set({ density })}
+                />
+              )}
+              {caps.brightness && (
+                <Range
+                  label="Brightness"
+                  lockControl={lock('brightness', 'Brightness')}
+                  disabled={readOnly}
+                  low="Mellow"
+                  high="Bright"
+                  value={config.brightness}
+                  format={{ style: 'percent' }}
+                  hint="Warm and muffled, or crisp and sparkly"
+                  onChange={(brightness) => set({ brightness })}
+                />
+              )}
+              {(caps.muteDrums || caps.muteBass || caps.scale) && (
+                <div role="group" aria-label="Rhythm and key" className="grid auto-cols-fr grid-flow-col gap-2">
+                  {caps.muteDrums && (
+                    <div className="flex min-w-0 flex-col items-center gap-1">
+                      <Chip on={!config.muteDrums} onChange={(on) => set({ muteDrums: !on })} icon={<Drum />}>
+                        Drums
+                      </Chip>
+                      {lock('muteDrums', 'Drums')}
+                    </div>
+                  )}
+                  {caps.muteBass && (
+                    <div className="flex min-w-0 flex-col items-center gap-1">
+                      <Chip on={!config.muteBass} onChange={(on) => set({ muteBass: !on })} icon={<Guitar />}>
+                        Bass
+                      </Chip>
+                      {lock('muteBass', 'Bass')}
+                    </div>
+                  )}
+                  {caps.scale && (
+                    <div className="flex min-w-0 flex-col items-center gap-1">
+                      <Select value={config.scale} onValueChange={(v) => set({ scale: v as Scale })}>
+                        <SelectTrigger
+                          aria-label="Key"
+                          title={`Key: ${SCALE_LABELS[config.scale] ?? config.scale}`}
+                          className="h-11 min-w-0 gap-1 rounded-xl bg-card px-2 text-[13px] transition-colors hover:bg-secondary [&>span:first-child]:truncate"
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {Object.values(Scale).map((s) => (
+                            <SelectItem key={s} value={s}>
+                              {SCALE_LABELS[s] ?? s}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {lock('scale', 'Key')}
+                    </div>
+                  )}
+                </div>
+              )}
               {caps.bpm && (
                 <Range
                   label="Tempo"
+                  lockControl={lock('bpm', 'Tempo')}
+                  disabled={readOnly}
                   low="Slow"
                   high="Fast"
                   value={config.bpm}
-                  min={60}
-                  max={200}
+                  min={CALM.bpm[0]}
+                  max={CALM.bpm[1]}
                   step={1}
-                  display={`${Math.round(config.bpm)} bpm`}
+                  format={{ maximumFractionDigits: 0 }}
+                  suffix=" bpm"
                   hint="Beats per minute. Changing it restarts the music for a moment."
                   onChange={(bpm) => set({ bpm })}
                 />
               )}
-              {caps.scale && (
-                <div className="flex flex-col gap-2">
-                  <div className="flex items-center justify-between gap-3 text-[13px]">
-                    <span className="font-medium">Key</span>
-                    <Select value={config.scale} onValueChange={(v) => set({ scale: v as Scale })}>
-                      <SelectTrigger aria-label="Key" className="h-8 w-32 bg-secondary">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {Object.values(Scale).map((s) => (
-                          <SelectItem key={s} value={s}>
-                            {SCALE_LABELS[s] ?? s}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <p className="text-[11px] leading-snug text-muted-foreground">
-                    The pen always plays in F, so F / Dm sounds best with it.
-                  </p>
-                </div>
-              )}
               {caps.guidance && (
                 <Range
                   label="Follow the words"
+                  lockControl={lock('guidance', 'Follow the words')}
+                  disabled={readOnly}
                   low="Loose"
                   high="Strict"
                   value={config.guidance}
-                  min={0}
-                  max={6}
+                  min={CALM.guidance[0]}
+                  max={CALM.guidance[1]}
                   step={0.1}
-                  display={config.guidance.toFixed(1)}
+                  format={{ minimumFractionDigits: 1, maximumFractionDigits: 1 }}
                   hint="Loose wanders and surprises; strict sticks closely to each sound's words"
                   onChange={(guidance) => set({ guidance })}
                 />
               )}
-            </div>
-          </details>
+            </fieldset>
+          </MixerReveal>
         )}
-      </div>
+      </AnimatePresence>
     </section>
   );
 }
@@ -273,162 +373,188 @@ function Feel({
 export function Mixer({
   open,
   onClose,
-  title,
+  status,
+  activity,
+  player,
   tracks,
   readOnly,
   dispatch,
   config,
+  configLocks,
   capabilities,
   vibe,
   vibes,
   onPickVibe,
-  follow,
-  onFollowChange,
   canAsk,
   thinking,
+  askError,
   onAsk,
   log,
 }: Props) {
   const [tab, setTab] = useState<'mix' | 'history'>('mix');
   const [choosingVibe, setChoosingVibe] = useState(false);
   const [ask, setAsk] = useState('');
+  const reduceMotion = useReducedMotion();
 
   return (
-    <aside
-      aria-label="mixer"
-      inert={!open}
-      className={cn(
-        'z-40 flex flex-col overflow-hidden bg-popover text-popover-foreground',
-        'fixed inset-x-2 bottom-2 max-h-[82dvh] rounded-[1.75rem] shadow-2xl ring-1 ring-border transition-transform duration-300 ease-out',
-        open ? 'translate-y-0' : 'translate-y-[calc(100%+1rem)]',
-        'lg:static lg:inset-auto lg:max-h-none lg:w-[22rem] lg:shrink-0 lg:translate-y-0 lg:shadow-none lg:transition-none',
-        !open && 'lg:hidden',
-      )}
-    >
-      <div className="flex items-center gap-1 px-3 pt-3 pb-2">
-        <div role="tablist" className="flex rounded-full bg-secondary p-1">
-          {(['mix', 'history'] as const).map((t) => (
-            <button
-              key={t}
-              type="button"
-              role="tab"
-              aria-selected={tab === t}
-              onClick={() => setTab(t)}
-              className={cn(
-                'h-7 rounded-full px-3.5 text-[13px] capitalize outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/60',
-                tab === t ? 'bg-popover text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
-              )}
-            >
-              {t === 'mix' ? 'Mixer' : 'History'}
-            </button>
-          ))}
+    <div className="mixer-shell" data-open={open} inert={!open} aria-hidden={!open}>
+      <aside aria-label="mixer" className="mixer-panel">
+        <div className="flex items-center gap-1 px-3 pt-3 pb-2">
+          <div role="tablist" className="flex rounded-full bg-secondary p-1">
+            {(['mix', 'history'] as const).map((t) => (
+              <button
+                key={t}
+                type="button"
+                role="tab"
+                aria-selected={tab === t}
+                onClick={() => setTab(t)}
+                className={cn(
+                  'h-7 rounded-full px-3.5 text-[13px] capitalize outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/60',
+                  tab === t ? 'bg-popover text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+                )}
+              >
+                {t === 'mix' ? 'Mixer' : 'History'}
+              </button>
+            ))}
+          </div>
+          <div className="flex-1" />
+          <button
+            type="button"
+            aria-label="Hide the mixer"
+            title="Hide the mixer"
+            onClick={onClose}
+            className="grid size-8 place-items-center rounded-full text-muted-foreground outline-none hover:bg-secondary hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
+          >
+            <X className="size-4" />
+          </button>
         </div>
-        <div className="flex-1" />
-        <button
-          type="button"
-          aria-label="Hide the mixer"
-          title="Hide the mixer"
-          onClick={onClose}
-          className="grid size-8 place-items-center rounded-full text-muted-foreground outline-none hover:bg-secondary hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
-        >
-          <X className="size-4" />
-        </button>
-      </div>
 
-      <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-3 pb-3">
-        {tab === 'mix' ? (
-          <div className="flex flex-col gap-6">
-            <section className="rounded-3xl bg-card p-4">
-              <p className="text-[12px] font-medium text-muted-foreground">
-                {readOnly ? 'Trying out' : 'Now playing'}
-              </p>
-              <p className="mt-0.5 font-display text-[1.6rem] leading-tight font-semibold tracking-[-0.02em] first-letter:uppercase">
-                {title}
-              </p>
-              <div className="mt-3 flex items-center gap-2 text-[13px]">
-                <span className="text-muted-foreground">Vibe</span>
-                <span className="font-medium">{vibe.name}</span>
-                <button
-                  type="button"
-                  aria-expanded={choosingVibe}
-                  onClick={() => setChoosingVibe((open) => !open)}
-                  className="ml-auto rounded-full px-2.5 py-1 text-[12px] text-muted-foreground outline-none hover:bg-secondary hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
-                >
-                  {choosingVibe ? 'Done' : 'Change'}
-                </button>
-              </div>
-              {choosingVibe && (
-                <div className="mt-3">
-                  <VibePicker
-                    vibes={vibes}
-                    current={vibe.id}
-                    onPick={(v) => {
-                      onPickVibe(v);
-                      setChoosingVibe(false);
-                    }}
+        <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-3 pb-3">
+          <motion.div
+            key={tab}
+            initial={{ opacity: 0, y: reduceMotion ? 0 : 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: reduceMotion ? 0 : 0.24, ease: MIXER_EASE }}
+          >
+            {tab === 'mix' ? (
+              <div className="flex flex-col gap-6">
+                {/* The selected music and its transport share one card. */}
+                <section aria-label="Vibe" className="rounded-3xl bg-card p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-[12px] font-medium text-muted-foreground">Vibe</p>
+                    <button
+                      type="button"
+                      aria-expanded={choosingVibe}
+                      onClick={() => setChoosingVibe((open) => !open)}
+                      className="shrink-0 rounded-full bg-secondary px-3 py-1.5 text-[12px] font-medium outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/60"
+                    >
+                      {choosingVibe ? 'Done' : 'Change vibe'}
+                    </button>
+                  </div>
+                  <div className="mt-2 flex min-h-8 items-center gap-3">
+                    <div className="flex min-w-0 flex-1 items-center gap-2">
+                      <p className="truncate text-[1.0625rem] leading-snug font-semibold">{vibe.name}</p>
+                      <span className="shrink-0">{activity}</span>
+                    </div>
+                    {player}
+                  </div>
+                  <p className="mt-1 text-[13px] leading-snug text-muted-foreground">{vibe.blurb}</p>
+                  <div
+                    role="status"
+                    className={cn('flex items-center gap-2 text-[12px] text-muted-foreground', status && 'mt-3')}
+                  >
+                    {status}
+                  </div>
+                  <AnimatePresence initial={false}>
+                    {choosingVibe && (
+                      <MixerReveal className="pt-3">
+                        <VibePicker
+                          vibes={vibes}
+                          current={vibe.id}
+                          onPick={(v) => {
+                            onPickVibe(v);
+                            setChoosingVibe(false);
+                          }}
+                        />
+                      </MixerReveal>
+                    )}
+                  </AnimatePresence>
+                </section>
+
+                <section>
+                  <Heading aside={`${tracks.length} of ${capabilities.maxPrompts}`}>Sounds</Heading>
+                  <TrackRack
+                    tracks={tracks}
+                    dispatch={dispatch}
+                    maxTracks={capabilities.maxPrompts}
+                    readOnly={readOnly}
                   />
-                </div>
-              )}
-              <div className="mt-4 flex items-start gap-3">
-                <div className="min-w-0 flex-1">
-                  <p className="text-[13px] font-medium">Follow my drawing</p>
-                  <p className="text-[12px] leading-snug text-muted-foreground">
-                    {follow
-                      ? 'Lifting your pen changes the music to match the page.'
-                      : 'The music stays as you set it while you draw.'}
-                  </p>
-                </div>
-                <Switch on={follow} onChange={onFollowChange} label="Follow my drawing" />
+                </section>
+
+                <Advanced
+                  config={config}
+                  configLocks={configLocks}
+                  readOnly={readOnly}
+                  capabilities={capabilities}
+                  dispatch={dispatch}
+                />
               </div>
-            </section>
+            ) : (
+              <ActionLog entries={log} />
+            )}
+          </motion.div>
+        </div>
 
-            <section>
-              <Heading aside={`${tracks.length} of ${capabilities.maxPrompts}`}>Sounds</Heading>
-              <TrackRack
-                tracks={tracks}
-                dispatch={dispatch}
-                maxTracks={capabilities.maxPrompts}
-                readOnly={readOnly}
-              />
-            </section>
-
-            <Feel config={config} capabilities={capabilities} dispatch={dispatch} />
-          </div>
-        ) : (
-          <ActionLog entries={log} />
-        )}
-      </div>
-
-      {tab === 'mix' && (
-        <form
-          className="border-t border-border p-3"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (!canAsk || !ask.trim()) return;
-            onAsk(ask.trim());
-            setAsk('');
-          }}
-        >
-          <div className="flex h-11 items-center gap-2 rounded-full bg-input pr-1 pl-4 focus-within:ring-2 focus-within:ring-ring/40">
-            <input
-              value={ask}
-              onChange={(e) => setAsk(e.target.value)}
-              placeholder={thinking ? 'Rewriting the mix…' : 'Ask for a change: “add a saxophone”'}
-              aria-label="Ask the band for a change"
-              className="min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-muted-foreground"
+        {tab === 'mix' && (
+          <form
+            className="border-t border-border p-3"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (thinking || !canAsk || !ask.trim()) return;
+              onAsk(ask.trim());
+              setAsk('');
+            }}
+          >
+            <FadeLine
+              text={thinking ? null : askError}
+              className="px-4 pb-2 text-[12px] leading-snug text-destructive"
             />
-            <button
-              type="submit"
-              aria-label="Send to the band"
-              title="Gemini rewrites the mix"
-              disabled={!canAsk || !ask.trim()}
-              className="grid size-9 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground outline-none transition-opacity hover:bg-primary/85 focus-visible:ring-2 focus-visible:ring-ring/60 disabled:opacity-30"
+            <div
+              aria-busy={thinking}
+              className="relative flex h-11 items-center gap-2 rounded-full bg-input pr-1 pl-4 focus-within:ring-2 focus-within:ring-ring/40"
             >
-              <ArrowUp className="size-4" />
-            </button>
-          </div>
-        </form>
-      )}
-    </aside>
+              <input
+                value={ask}
+                onChange={(e) => setAsk(e.target.value)}
+                disabled={thinking}
+                placeholder={thinking ? '' : 'Ask for a change: “make it more chill”'}
+                aria-label="Ask for a change"
+                className="min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-muted-foreground disabled:cursor-default"
+              />
+              {/* While Gemini works the box rests, and its words shimmer in where the hint was. */}
+              <span
+                aria-hidden="true"
+                className={cn(
+                  'pointer-events-none absolute inset-y-0 left-4 flex items-center text-[13px] transition-opacity duration-300 motion-reduce:transition-none',
+                  SETTLE,
+                  thinking ? 'opacity-100' : 'opacity-0',
+                )}
+              >
+                <span className={thinking ? 'shimmer' : undefined}>Rewriting the mix…</span>
+              </span>
+              <button
+                type="submit"
+                aria-label="Send to Gemini"
+                title="Gemini rewrites the mix"
+                disabled={thinking || !canAsk || !ask.trim()}
+                className="grid size-9 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground outline-none transition-opacity hover:bg-primary/85 focus-visible:ring-2 focus-visible:ring-ring/60 disabled:opacity-30"
+              >
+                <ArrowUp className="size-4" />
+              </button>
+            </div>
+          </form>
+        )}
+      </aside>
+    </div>
   );
 }

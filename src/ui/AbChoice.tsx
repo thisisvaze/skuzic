@@ -69,29 +69,42 @@ export function AbChoice({
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
         {variants.map((variant, i) => {
+          const name = i === 0 ? 'A' : 'B';
           const playing = audition === i;
+          const warmingUp = i === 1 && warming;
+          const canListen = !playing && !warmingUp;
           const live = variant.tracks.filter((t) => !t.muted && t.volume > 0);
           return (
             <div
               key={i}
+              // A tap anywhere on a card plays it. The letter is the same action
+              // for the keyboard: its click bubbles up to here.
+              onClick={() => canListen && onAudition(i)}
               className={cn(
                 'flex flex-col gap-3 rounded-2xl bg-card p-4 transition-shadow',
-                playing && 'ring-1 ring-live',
+                playing ? 'ring-1 ring-live' : canListen && 'cursor-pointer hover:ring-1 hover:ring-foreground/20',
               )}
             >
               <div className="flex items-center gap-2">
-                <span className="font-semibold">{i === 0 ? 'A' : 'B'}</span>
+                <button
+                  type="button"
+                  disabled={!canListen}
+                  aria-label={`Listen to ${name}`}
+                  className="rounded-md font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+                >
+                  {name}
+                </button>
                 {playing && <span className="text-[12px] text-live">playing</span>}
+                {warmingUp && <span className="text-[12px] text-muted-foreground">warming…</span>}
                 <div className="flex-1" />
                 <Button
-                  variant="ghost"
+                  variant="secondary"
                   size="sm"
-                  disabled={playing || (i === 1 && warming)}
-                  onClick={() => onAudition(i)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onChoose(i);
+                  }}
                 >
-                  {i === 1 && warming ? 'warming…' : 'listen'}
-                </Button>
-                <Button variant="secondary" size="sm" onClick={() => onChoose(i)}>
                   keep
                 </Button>
               </div>
