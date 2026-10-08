@@ -701,7 +701,7 @@ export const DrawCanvas = forwardRef<CanvasHandle, Props>(function DrawCanvas(
         });
       }
       const { width, height } = e.currentTarget.getBoundingClientRect();
-      const tool = erasing ? 'eraser' : medium === 'watercolor' || brushSize >= MARKER_SIZE ? 'marker' : 'pencil';
+      const tool = erasing ? 'eraser' : medium === 'watercolor' ? 'watercolor' : brushSize >= MARKER_SIZE ? 'marker' : 'pencil';
       touch.current.down(x, y, pressure, e.timeStamp, width, height, tool, brushOpacity);
     }
     present();

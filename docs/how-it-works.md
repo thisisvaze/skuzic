@@ -141,12 +141,22 @@ its own AudioContext so it plays while the bed is paused or still connecting.
   and the eraser like rubber.
 - **Clearing the page** is a soft swish.
 
-The web piano layer answers brush strokes on both the landing page and `/app`.
-It plays soft, spaced phrases in F major / D minor pentatonic using
-`public/sounds/piano-*.mp3`, with a quiet synthesized note while samples decode.
-Samples are prefetched at startup. Rapid hatching and erasing stay textural,
-and long drawing sessions gradually leave more space between piano phrases.
-Scene-change chimes remain removed; the iPad pen still plays paper texture only.
+On the web, notes answer brush strokes on both the landing page and `/app`, in
+soft, spaced phrases in F major / D minor pentatonic. Each brush has its own
+voice, synthesized in the engine, and neither is an instrument the bed plays:
+
+- **Pencil plucks**: a soft wooden note, gone in about half a second. Sharp
+  corners pluck too, so zigzags play and smooth lines stay quiet, and every
+  touchdown ticks.
+- **Watercolor swells**: a two-note chord with no attack that rises with paint
+  flow (speed and pressure), walks the scale as the brush moves up or down,
+  and fades for a couple of seconds after the brush lifts.
+
+Settings → Brush sounds switches back to the earlier piano
+(`public/sounds/piano-*.mp3`, prefetched at startup) to compare. Rapid hatching
+and erasing stay textural, and long drawing sessions gradually leave more space
+between phrases. Scene-change chimes remain removed; the iPad pen still plays
+paper texture only.
 
 `LEVEL` is the one knob for balancing it against the bed by ear. The iPad
 plays the same pen (`ios/Skuzic/Audio/TouchEngine.swift`, on AVAudioEngine),

@@ -1,6 +1,6 @@
 import { Scale } from '@google/genai';
 import { checkGeminiKey, toApiConfig } from '../src/audio/lyria';
-import { NOTES, attend, frictionLevel, mayPlay, nextNote, phrase } from '../src/audio/touch';
+import { NOTES, attend, bendAt, bendTo, frictionLevel, mayPlay, nextNote, phrase } from '../src/audio/touch';
 import {
   DEFAULT_VIBE,
   chooseInstruments,
@@ -239,6 +239,22 @@ check('notes keep their distance, more so as attention settles', !mayPlay(1200, 
 check('a still pen is silent', frictionLevel(0, 1) === 0);
 check('zero pressure never mutes a moving pen', frictionLevel(800, 0) > 0);
 check('friction never exceeds full level', frictionLevel(1e6, 1) <= 1);
+
+/** How many corners the pencil finds along a path of points 2 px or so apart. */
+const corners = (path: [number, number][]) => {
+  let bend = bendAt(...path[0]);
+  let n = 0;
+  for (const [x, y] of path.slice(1)) {
+    const next = bendTo(bend, x, y);
+    if (next) [bend, n] = [next.bend, n + Number(next.corner)];
+  }
+  return n;
+};
+const steps = Array.from({ length: 40 }, (_, i) => i);
+check('a right-angle corner plucks once', corners([...steps.map((i): [number, number] => [2 * i, 2 * i]), ...steps.map((i): [number, number] => [80 + 2 * i, 80 - 2 * i])]) === 1);
+check('a zigzag plucks at every turn', corners(Array.from({ length: 200 }, (_, i): [number, number] => [2 * i, 40 - Math.abs((2 * i) % 80 - 40)])) === 9);
+check('a smooth curve never plucks', corners(Array.from({ length: 360 }, (_, i): [number, number] => [120 * Math.cos(i / 57.3), 120 * Math.sin(i / 57.3)])) === 0);
+check('a shaky straight line never plucks', corners(Array.from({ length: 200 }, (_, i): [number, number] => [2 * i, (i % 3) * 1.5])) === 0);
 
 console.log('eyes');
 

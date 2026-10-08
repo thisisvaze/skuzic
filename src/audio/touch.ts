@@ -185,6 +185,33 @@ export function mayPlay(now: number, last: number, attention: number): boolean {
   return now - last >= NOTE_GAP_MS / attention;
 }
 
+/** Where the pen's current stretch began, the direction of the last one, and how far that one turned. */
+export interface Bend {
+  x: number;
+  y: number;
+  dx: number;
+  dy: number;
+  turned: number;
+}
+
+/** A bend that starts at pen down, with no direction yet. */
+export const bendAt = (x: number, y: number): Bend => ({ x, y, dx: 0, dy: 0, turned: 0 });
+
+/** The bend once the pen reaches (x, y), and whether that was a corner; null until it has travelled a SEGMENT. */
+export function bendTo(b: Bend, x: number, y: number): { bend: Bend; corner: boolean } | null {
+  const dx = x - b.x;
+  const dy = y - b.y;
+  if (Math.hypot(dx, dy) < SEGMENT) return null;
+  // Signed, so a wiggle cancels out instead of adding up.
+  const turned = b.dx || b.dy ? Math.atan2(b.dx * dy - b.dy * dx, b.dx * dx + b.dy * dy) : 0;
+  // A corner usually falls inside a stretch, which splits its turn across two.
+  const corner = Math.max(Math.abs(turned), Math.abs(turned + b.turned)) > CORNER;
+  return { bend: { x, y, dx, dy, turned: corner ? 0 : turned }, corner };
+}
+
+/** The melody note and the scale note two steps below it (above, at the bottom): a third or a fourth. */
+const chord = (i: number) => [NOTES[i], NOTES[i >= 2 ? i - 2 : i + 2]];
+
 /** A warm room about two seconds long: decaying noise, low-passed so the tail isn't hissy. */
 function room(ctx: BaseAudioContext): AudioBuffer {
   const length = Math.round(ctx.sampleRate * 2.2);
@@ -258,8 +285,16 @@ export class TouchEngine {
   private paperLevel: GainNode;
   private paperPan: StereoPannerNode;
   private stroke?: { source: AudioBufferSourceNode; fade: GainNode };
+  /** The watercolor chord while the brush is down; `part` 0 is the melody note, 1 the one under it. */
+  private swell?: {
+    oscs: { osc: OscillatorNode; part: number }[];
+    amp: GainNode;
+    tone: BiquadFilterNode;
+    steppedAt: number;
+  };
   private meter: () => number = () => 0;
 
+  private voice: PenVoice = 'brushes';
   private tool: PenTool = 'pencil';
   private opacity = 1;
   private size = { width: 1, height: 1 };
@@ -267,6 +302,7 @@ export class TouchEngine {
   private last?: { x: number; y: number; t: number };
   private travel = 0;
   private speed = 0;
+  private bend?: Bend;
   private lastSteer = -Infinity;
 
   private attention = 1;
@@ -277,7 +313,7 @@ export class TouchEngine {
   /** Notes left in the current phrase, and when the breath after it ends. */
   private phrase = { left: 0, breathUntil: -Infinity };
   private lastStroke = { end: -Infinity, ms: Infinity };
-  private voices: { source: AudioBufferSourceNode | OscillatorNode; amp: GainNode }[] = [];
+  private voices: { source: AudioScheduledSourceNode; amp: GainNode }[] = [];
 
   constructor() {
     const ctx = this.ctx;
@@ -346,10 +382,14 @@ export class TouchEngine {
     // Normally already running, since it was built inside a gesture, but the
     // OS can suspend a context across sleep and only a gesture may resume it.
     this.ctx.resume().catch(() => {});
+    // A stroke whose up never came (a cancelled pointer) lets its chord go now.
+    this.releaseSwell();
+    this.voice = penVoice();
     this.size = { width: width || 1, height: height || 1 };
     this.start = this.last = { x, y, t };
     this.travel = 0;
     this.speed = 0;
+    this.bend = bendAt(x, y);
     this.tool = tool;
     this.opacity = opacity;
     const restful = t - this.lastActive;
@@ -357,15 +397,15 @@ export class TouchEngine {
     this.startPaper(x);
 
     if (tool === 'eraser') return;
+    if (this.voice !== 'piano') {
+      if (tool === 'watercolor') return this.startSwell(x, y, pressure, t);
+      this.tick(pressure);
+    }
     // Hatching: a quick stroke right after another quick stroke is texture, not melody.
     const hatching = this.lastStroke.ms < 180 && t - this.lastStroke.end < 250;
     const fresh = restful > PHRASE_MS;
     if (fresh) this.phrase = { left: phrase(this.attention, Math.random).notes, breathUntil: -Infinity };
-    if (hatching || !mayPlay(t, this.lastNote, this.attention)) return;
-    if (this.phrase.left <= 0) {
-      if (t < this.phrase.breathUntil) return; // the pen is breathing
-      this.phrase.left = phrase(this.attention, Math.random).notes;
-    }
+    if (hatching || !this.roomForNote(t)) return;
     if (!fresh && Math.random() > 0.35 + 0.65 * this.attention) return;
     this.sing(this.aim(y), pressure, t, fresh ? 1 : 0.9);
   }
@@ -383,6 +423,7 @@ export class TouchEngine {
     this.travel += step;
     this.last = { x, y, t };
     this.lastActive = t;
+    if (this.voice !== 'piano' && (this.tool === 'pencil' || this.tool === 'marker')) this.corner(x, y, pressure, t);
 
     // Pointer events can outpace what the ear needs, and every automation
     // event is work for the audio thread.
@@ -410,6 +451,7 @@ export class TouchEngine {
       0.05,
     );
     this.paperPan.pan.setTargetAtTime(this.panAt(x), now, 0.05);
+    if (this.swell) this.steerSwell(y, pressure, t, now);
   }
 
   up(t = performance.now()): void {
@@ -424,6 +466,7 @@ export class TouchEngine {
       this.stroke.source.stop(now + 0.3);
       this.stroke = undefined;
     }
+    this.releaseSwell();
     if (!start || !last) return;
 
     const ms = last.t - start.t;
@@ -432,6 +475,7 @@ export class TouchEngine {
     // A long, deliberate stroke sometimes lands on a note where it ends.
     if (
       this.tool !== 'eraser' &&
+      (this.voice === 'piano' || this.tool !== 'watercolor') &&
       this.phrase.left > 0 &&
       ms > 900 &&
       this.travel > 180 &&
@@ -502,6 +546,103 @@ export class TouchEngine {
     this.stroke = { source, fade };
   }
 
+  /** Whether a note fits now: spaced from the last and not in a breath. Starts the next phrase after a breath. */
+  private roomForNote(t: number): boolean {
+    if (!mayPlay(t, this.lastNote, this.attention)) return false;
+    if (this.phrase.left > 0) return true;
+    if (t < this.phrase.breathUntil) return false; // the pen is breathing
+    this.phrase.left = phrase(this.attention, Math.random).notes;
+    return true;
+  }
+
+  /** A sharp change of direction plucks, inside the same phrases as everything else. */
+  private corner(x: number, y: number, pressure: number, t: number): void {
+    const next = this.bend && bendTo(this.bend, x, y);
+    if (!next) return;
+    this.bend = next.bend;
+    if (next.corner && this.roomForNote(t) && Math.random() < 0.35 + 0.65 * this.attention) {
+      this.sing(this.aim(y), pressure, t, 0.8);
+    }
+  }
+
+  /** Graphite meeting paper: a few milliseconds of grain, panned with the paper. */
+  private tick(pressure: number): void {
+    const ctx = this.ctx;
+    const now = ctx.currentTime;
+    const source = new AudioBufferSourceNode(ctx, { buffer: this.paperBuffers.rough });
+    const amp = new GainNode(ctx, { gain: TICK * weight(pressure) * (0.6 + 0.4 * this.attention) });
+    amp.gain.setTargetAtTime(0, now + 0.001, 0.004);
+    source
+      .connect(new BiquadFilterNode(ctx, { type: 'bandpass', frequency: 2800, Q: 1.2 }))
+      .connect(amp)
+      .connect(this.paperPan);
+    source.start(now, Math.random() * 3);
+    source.stop(now + 0.04);
+  }
+
+  /** Watercolor: a soft chord blooms where the brush lands, then follows the paint. */
+  private startSwell(x: number, y: number, pressure: number, t: number): void {
+    const ctx = this.ctx;
+    const now = ctx.currentTime;
+    this.melody = nextNote(this.melody, this.aim(y), Math.random);
+    const tone = new BiquadFilterNode(ctx, { type: 'lowpass', frequency: 700, Q: 0.7 });
+    const amp = new GainNode(ctx, { gain: 0 });
+    tone.connect(amp).connect(new StereoPannerNode(ctx, { pan: this.panAt(x) })).connect(this.notes);
+    // Two slightly detuned triangles a note beat slowly, like colour that isn't quite even.
+    const oscs = chord(this.melody).flatMap((midi, part) => {
+      const level = new GainNode(ctx, { gain: part ? 0.35 : 0.5 });
+      level.connect(tone);
+      return [-6, 6].map((detune) => {
+        const osc = new OscillatorNode(ctx, { type: 'triangle', frequency: hz(midi), detune });
+        osc.connect(level);
+        osc.start(now);
+        return { osc, part };
+      });
+    });
+    amp.gain.setTargetAtTime(SWELL * 0.4 * weight(pressure) * (0.5 + 0.5 * this.opacity), now, 0.03);
+    amp.gain.setTargetAtTime(0, now + 0.15, SWELL_RELEASE);
+    this.swell = { oscs, amp, tone, steppedAt: t };
+  }
+
+  /** Paint flow (speed and pressure) swells the chord and opens it up; a still brush lets it fade. */
+  private steerSwell(y: number, pressure: number, t: number, now: number): void {
+    const swell = this.swell!;
+    const flow = frictionLevel(this.speed, pressure);
+    const level = swell.amp.gain;
+    level.cancelScheduledValues(now);
+    level.setTargetAtTime(
+      SWELL *
+        (0.25 + 0.75 * flow) *
+        (0.5 + 0.5 * this.opacity) *
+        (0.7 + 0.3 * this.attention) *
+        (1 - 0.35 * this.meter()),
+      now,
+      0.15,
+    );
+    level.setTargetAtTime(0, now + 0.12, SWELL_RELEASE);
+    swell.tone.frequency.setTargetAtTime(600 + 2600 * flow, now, 0.1);
+    // Up or down the page, the chord walks the scale a step at a time.
+    const aim = this.aim(y);
+    if (this.melody !== null && Math.abs(aim - this.melody) >= 1.5 && t - swell.steppedAt > SWELL_STEP_MS) {
+      this.melody = nextNote(this.melody, aim, Math.random);
+      swell.steppedAt = t;
+      const notes = chord(this.melody);
+      for (const { osc, part } of swell.oscs) osc.frequency.setTargetAtTime(hz(notes[part]), now, 0.06);
+    }
+  }
+
+  /** The lifted brush's chord fades like paint still spreading, then stops. */
+  private releaseSwell(): void {
+    const swell = this.swell;
+    if (!swell) return;
+    this.swell = undefined;
+    const now = this.ctx.currentTime;
+    swell.amp.gain.cancelScheduledValues(now);
+    swell.amp.gain.setTargetAtTime(0, now, SWELL_RELEASE);
+    for (const { osc } of swell.oscs) osc.stop(now + SWELL_RELEASE * 7);
+    this.keep(swell.oscs[0].osc, swell.amp);
+  }
+
   /** One melody note, sometimes with a softer third below it, rolled like a hand. */
   private sing(aim: number, pressure: number, t: number, accent: number): void {
     this.phrase.left--;
@@ -531,12 +672,13 @@ export class TouchEngine {
     const tone = new BiquadFilterNode(ctx, { type: 'lowpass', frequency: 1500 + 3500 * velocity, Q: 0.4 });
     const amp = new GainNode(ctx, { gain: velocity });
     tone.connect(amp).connect(new StereoPannerNode(ctx, { pan })).connect(this.notes);
+    const cents = (Math.random() - 0.5) * 8;
+    if (this.voice !== 'piano') return this.keep(this.pluck(midi, cents, when, tone), amp);
 
     const root = PIANO_ROOTS.reduce((a, b) => (Math.abs(b - midi) < Math.abs(a - midi) ? b : a));
     const sample = this.piano.get(root);
     let source: AudioBufferSourceNode | OscillatorNode;
     if (sample) {
-      const cents = (Math.random() - 0.5) * 8;
       source = new AudioBufferSourceNode(ctx, {
         buffer: sample.buffer,
         playbackRate: 2 ** ((midi - root + cents / 100) / 12),
@@ -545,7 +687,7 @@ export class TouchEngine {
       source.start(when, sample.onset);
     } else {
       // Until the piano arrives: a soft sine bell with a quick fade.
-      source = new OscillatorNode(ctx, { frequency: 440 * 2 ** ((midi - 69) / 12) });
+      source = new OscillatorNode(ctx, { frequency: hz(midi) });
       const bell = new GainNode(ctx, { gain: 0 });
       bell.gain.setValueAtTime(0, when);
       bell.gain.linearRampToValueAtTime(0.5, when + 0.006);
@@ -554,8 +696,32 @@ export class TouchEngine {
       source.start(when);
       source.stop(when + 2.5);
     }
+    this.keep(source, amp);
+  }
 
-    // Eight voices is plenty for a pen; the oldest bows out quickly when a ninth arrives.
+  /** The pencil's soft wooden pluck, built from PLUCK; returns the fundamental, which rings longest. */
+  private pluck(midi: number, cents: number, when: number, out: AudioNode): OscillatorNode {
+    const ctx = this.ctx;
+    const f = hz(midi);
+    const decay = PLUCK_DECAY * Math.sqrt(440 / f);
+    const [fundamental] = PLUCK.filter((p) => p.ratio * f < 12_000).map((p) => {
+      const osc = new OscillatorNode(ctx, { frequency: f * p.ratio, detune: cents });
+      const env = new GainNode(ctx, { gain: 0 });
+      // Two milliseconds of attack: a soft mallet, not a click.
+      env.gain.setValueAtTime(0, when);
+      env.gain.linearRampToValueAtTime(PLUCK_LEVEL * p.level, when + 0.002);
+      env.gain.setTargetAtTime(0, when + 0.002, decay * p.decay);
+      osc.connect(env).connect(out);
+      osc.start(when);
+      osc.stop(when + 0.002 + 7 * decay * p.decay);
+      return osc;
+    });
+    return fundamental;
+  }
+
+  /** Eight voices is plenty for a pen; the oldest bows out quickly when a ninth arrives. */
+  private keep(source: AudioScheduledSourceNode, amp: GainNode): void {
+    const ctx = this.ctx;
     this.voices.push({ source, amp });
     source.onended = () => {
       this.voices = this.voices.filter((v) => v.source !== source);
