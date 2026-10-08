@@ -20,8 +20,8 @@ restarts. It just keeps bending around whatever you draw.
 
 ```
 you draw a house
-  → you hear the paper under the pen, and a soft piano answers in key
-  → you lift the pen: SigLIP 2 reads the page, also in the browser: "home and city"
+  → you hear the paper under the pen
+  → you lift the pen: SigLIP 2 reads what you drew, also in the browser: "house"
   → the band follows: cozy and nostalgic, warm Rhodes in front, the beat never stops
   → Lyria RealTime plays the new sound, live
 ```
@@ -85,7 +85,10 @@ still asks Gemini. It isn't available on skuzic.vercel.app, which has no
 bridge to talk to.
 
 On iPad/iPhone: open `ios/Skuzic.xcodeproj`, run, then **Settings** (gear) and
-paste the same kind of key. It lives in the Keychain, not the app binary.
+paste the same kind of key. It lives in the Keychain, not the app binary. The
+on-device drawing reader (59 MB) isn't in the repo: build it once with
+`scripts/make-siglip-coreml.py` (the command is at the top of the file). Until
+then, lifting the pen asks Gemini.
 
 ## Build it with us
 
