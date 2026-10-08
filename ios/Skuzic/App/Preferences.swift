@@ -8,15 +8,13 @@ enum Preferences {
     enum Key: String {
         /// Keychain, not UserDefaults — this is a secret.
         case apiKey = "skuzic_key"
-        case masterVolume = "skuzic_master_volume"
-        case autoInterpret = "skuzic_auto_interpret"
         case plannerModel = "skuzic_planner_model"
         case plannerConfig = "skuzic_planner_config"
         case brush = "skuzic_brush"
         case inkColor = "skuzic_ink_color"
         case brushSize = "skuzic_brush_size"
         case inkOpacity = "skuzic_ink_opacity"
-        case penSound = "skuzic_paper_sound"
+        case brushSound = "skuzic_brush_sound"
         /// The vibe a session starts from, like the web build's skuzic_vibe.
         case vibe = "skuzic_vibe"
         /// "system", "light" or "dark".

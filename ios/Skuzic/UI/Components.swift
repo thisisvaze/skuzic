@@ -1,35 +1,5 @@
 import SwiftUI
 
-/// On/off. "On" wears the brand gradient: it is always something the music is doing.
-struct BrandToggleStyle: ToggleStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            configuration.label
-            Spacer(minLength: 0)
-            Button {
-                withAnimation(.snappy(duration: 0.2)) { configuration.isOn.toggle() }
-            } label: {
-                track(configuration)
-            }
-            .buttonStyle(.plain)
-            .accessibilityRepresentation { Toggle(isOn: configuration.$isOn) { configuration.label } }
-        }
-    }
-
-    private func track(_ configuration: Configuration) -> some View {
-            ZStack(alignment: configuration.isOn ? .trailing : .leading) {
-                Capsule()
-                    .fill(configuration.isOn ? AnyShapeStyle(Theme.brand) : AnyShapeStyle(Theme.muted))
-                    .frame(width: 44, height: 26)
-                Circle()
-                    .fill(.white)
-                    .frame(width: 22, height: 22)
-                    .shadow(color: .black.opacity(0.25), radius: 1.5, y: 1)
-                    .padding(2)
-            }
-    }
-}
-
 /// The chunky channel fader: a tinted capsule that fills to the level, with a
 /// white cap to grab.
 struct Fader: View {
@@ -138,17 +108,17 @@ struct SectionHeading: View {
     }
 }
 
-/// A pencil line that is also a sound wave: the whole idea in one stroke.
+/// The skuzic mark, a bold scribble running into three bars, in the shared brand gradient.
 struct Wordmark: View {
     var showName = true
 
     var body: some View {
         HStack(spacing: 8) {
-            SVGPath.path("M2 8c2.4-6 4.8-6 7 0s4.6 6 7 0 4.6-6 7 0 3.4 4.5 5 2")
-                .stroke(LinearGradient(colors: [Theme.brand1, Theme.brand2, Theme.brand3],
-                                       startPoint: .leading, endPoint: .trailing),
-                        style: StrokeStyle(lineWidth: 3, lineCap: .round))
-                .frame(width: 30, height: 16)
+            Image("SkuzicMark")
+                .resizable()
+                .renderingMode(.original)
+                .scaledToFit()
+                .frame(width: 33.8, height: 28.4)
             if showName {
                 Text("skuzic")
                     .font(.system(size: 19, weight: .bold))
@@ -169,4 +139,45 @@ extension View {
             .overlay(shape.stroke(Theme.border, lineWidth: 1))
             .shadow(color: .black.opacity(0.12), radius: 14, y: 5)
     }
+}
+
+/// Gemini at work: a soft light sweeps across the words, as `.shimmer` does on
+/// the web. It only adds the light, so give the words a muted colour while it
+/// runs. Under Reduce Motion they just rest.
+private struct Shimmer: ViewModifier {
+    let active: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var phase: CGFloat = 0
+
+    func body(content: Content) -> some View {
+        if active && !reduceMotion {
+            content
+                .overlay {
+                    GeometryReader { geometry in
+                        let width = geometry.size.width
+                        LinearGradient(stops: [.init(color: .clear, location: 0.38),
+                                               .init(color: Theme.ink, location: 0.5),
+                                               .init(color: .clear, location: 0.62)],
+                                       startPoint: .leading, endPoint: .trailing)
+                            .frame(width: width * 2.5)
+                            // The light enters from the left and leaves on the right.
+                            .offset(x: -1.5 * width + phase * 1.5 * width)
+                    }
+                    .mask(content)
+                    .allowsHitTesting(false)
+                }
+                .onAppear {
+                    phase = 0
+                    withAnimation(.timingCurve(0.45, 0, 0.55, 1, duration: 1.9).repeatForever(autoreverses: false)) {
+                        phase = 1
+                    }
+                }
+        } else {
+            content
+        }
+    }
+}
+
+extension View {
+    func shimmer(_ active: Bool = true) -> some View { modifier(Shimmer(active: active)) }
 }

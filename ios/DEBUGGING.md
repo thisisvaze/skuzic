@@ -55,7 +55,6 @@ Fifteen seconds without new audio while generation is wanted triggers reconnect.
 3. Note the approximate time of any cutout and retain the surrounding
    AUDIO_HEALTH and BUFFER_UNDERRUN lines.
 4. Try pause/resume, background/foreground, and manual tempo changes.
-5. Repeat with auto-interpret disabled to isolate the planner path.
 
 Save the sketch by returning to the gallery before a terminal relaunch:
 

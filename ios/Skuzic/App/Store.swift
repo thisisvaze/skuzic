@@ -23,16 +23,9 @@ final class SkuzicStore: ObservableObject {
     @Published private(set) var buffered: Double = 0
     @Published private(set) var playbackRequested = false
 
-    @Published var masterVolume: Float = Float(Preferences.double(.masterVolume, or: 0.8)) {
-        didSet {
-            engine.setMasterVolume(masterVolume)
-            preview?.setVolume(masterVolume)
-            Preferences.set(Double(masterVolume), .masterVolume)
-        }
-    }
+    /// The music's level. There's no volume control in the app; the device's own does that job.
+    static let volume: Float = 0.8
 
-    /// What the band is playing: a mood, a vibe's name, or nil for nothing yet.
-    @Published private(set) var scene: String?
     /// The vibe a session starts from. Persisted, like the web build's.
     @Published private(set) var vibeID = Preferences.string(.vibe) ?? "blank"
     /// The vibe whose preview loop is playing, if any.
@@ -43,28 +36,23 @@ final class SkuzicStore: ObservableObject {
     /// The reader couldn't load (no model in the build, or a system too old for it).
     @Published private(set) var eyesUnavailable = false
 
-    /// Told when the eyes hear a new mood, so the pen can answer before the band does.
-    var onCue: ((Bool) -> Void)?
-
     let book = PaletteBook.shared
     var vibe: Palette.Vibe? { book?.vibe(vibeID) }
     private var eyes: Eyes?
     private var eyesTask: Task<Eyes?, Never>?
     /// The mix the eyes last put on, so a reading that agrees changes nothing.
     private var mix: Mix?
+    /// Figures already read, by key; nil for one erased down to bare paper.
+    private var seen: [String: Seen?] = [:]
     private var reading = false
     private var readAgain = false
-    private var latestPage: (() -> CGImage?)?
+    private var latestPage: (() -> Page?)?
     /// Set when the artist picks a vibe with a drawing already there: play now.
     private var startNow = false
     private var preview: VibePreview?
     private var handover: AnyCancellable?
     /// How long the band takes to wind down when the page is wiped.
     private static let clearFade = 3.0
-
-    @Published var autoInterpret = Preferences.bool(.autoInterpret, or: true) {
-        didSet { Preferences.set(autoInterpret, .autoInterpret) }
-    }
 
     /// Persisted so the choice survives a relaunch, like the web build's
     /// localStorage entry.
@@ -163,7 +151,10 @@ final class SkuzicStore: ObservableObject {
         // back to the last one dialled in rather than the shipped defaults.
         let restored = saved ?? SketchState(
             tracks: [], config: Preferences.decode(.lastConfig, as: MixConfig.self) ?? MixConfig())
-        state = SkuzicState(tracks: restored.tracks, config: restored.config, contextEpoch: 0)
+        // Through the reducer, so a config saved before the calm bands is held to them.
+        state = reduce(
+            SkuzicState(tracks: restored.tracks, config: restored.config, contextEpoch: 0),
+            .setConfig(ConfigPatch(bpm: restored.config.bpm, guidance: restored.config.guidance)))
         reserveTrackIDs(restored.tracks)
     }
 
@@ -204,10 +195,10 @@ final class SkuzicStore: ObservableObject {
         return await eyesTask?.value
     }
 
-    /// Pen-up, undo, redo: read the page and move the band if it now reads as
-    /// something new. One reading at a time; strokes that land mid-read collapse
-    /// into one more read of the newest page. A port of readDrawing in App.tsx.
-    func readDrawing(_ page: @escaping () -> CGImage?) async {
+    /// Pen-up, undo, redo: read what changed on the page and move the band if it
+    /// now shows something new. One reading at a time; strokes that land mid-read
+    /// collapse into one more read of the newest page. A port of readDrawing in App.tsx.
+    func readDrawing(_ page: @escaping () -> Page?) async {
         latestPage = page
         if reading {
             readAgain = true
@@ -223,38 +214,59 @@ final class SkuzicStore: ObservableObject {
             readAgain = false
             guard connected, let render = latestPage else { return }
             let started = Diagnostics.now
-            Diagnostics.event(.drawing, "READ_BEGIN playing=\(mix?.mood.id ?? "none")")
+            Diagnostics.event(.drawing, "READ_BEGIN playing=\(mix?.moods.first?.item.id ?? "none")")
             let playing = mix
             var next: Mix? = playing.map(book.isIntro) == true ? nil : book.introMix(vibe)
             var ink = Ink.none
             var reasoning = "the page is empty"
-            if let image = render() {
+            if let sheet = render() {
                 guard let eyes = await loadEyes() else {
                     push(LogEntry(id: 0, event: "Couldn't load the drawing reader",
                                   error: "Following the drawing will ask Gemini instead."))
                     return
                 }
-                let vector: [Float]
-                do {
-                    vector = try await Task.detached(priority: .userInitiated) { try eyes.read(image) }.value
-                } catch {
-                    Diagnostics.failure(.drawing, "READ_FAILED", error)
-                    push(LogEntry(id: 0, event: "Couldn't read the drawing", error: error.localizedDescription))
-                    return
+                // Only a figure that changed costs a SigLIP pass, which after a
+                // stroke is usually just the one being drawn.
+                var known: [String: Seen?] = [:]
+                var figures: [Seen] = []  // in drawing order: the last is the one being drawn
+                for figure in book.figures(sheet.marks, page: sheet.size) {
+                    if let cached = seen[figure.key] {
+                        known[figure.key] = cached
+                        if let cached { figures.append(cached) }
+                        continue
+                    }
+                    guard let crop = sheet.crop(figure.box) else { continue }
+                    if Ink.read(crop).coverage < 0.002 {
+                        known[figure.key] = .some(nil)
+                        continue
+                    }
+                    do {
+                        let vector = try await Task.detached(priority: .userInitiated) { try eyes.read(crop) }.value
+                        let read = Seen(figure: figure, image: vector, moods: book.readFigure(vector))
+                        known[figure.key] = read
+                        figures.append(read)
+                    } catch {
+                        Diagnostics.failure(.drawing, "READ_FAILED", error)
+                        push(LogEntry(id: 0, event: "Couldn't read the drawing", error: error.localizedDescription))
+                        return
+                    }
                 }
-                ink = Ink.read(image)
-                let reading = book.readPage(vector, vibe: vibe)
-                reasoning = (reading.moods.prefix(2).map { "\($0.item.label) \(Int($0.p * 100))%" }
+                seen = known
+                ink = Ink.read(sheet.image)
+                let reading = book.readScene(figures, vibe: vibe)
+                reasoning = (["saw " + figures.map { "\($0.moods[0].item.label) \(Int($0.moods[0].p * 100))%" }
+                    .joined(separator: ", ")]
                     + reading.instruments.prefix(2).map { "\($0.item.label) \(Int($0.p * 100))%" })
                     .joined(separator: " · ")
                 next = book.nextMix(reading, playing: playing, vibe: vibe)
-                Diagnostics.event(.drawing, "READ_END \(reasoning) -> \(next?.mood.id ?? "hold")")
+                Diagnostics.event(.drawing, "READ_END \(reasoning) -> \(next.map(PaletteBook.title) ?? "hold")")
             }
             guard let current = next ?? playing else { continue }
             // How much ink and how warm it is move the two live knobs on every
             // reading. Starting from silence is also when the vibe's tempo and
             // drums go in: a tempo change restarts the band.
-            let knobs = ink.config(density: current.mood.density, brightness: current.mood.brightness)
+            let feel = PaletteBook.feel(current)
+            let knobs = ink.config(density: feel.density, brightness: feel.brightness)
             var patch = ConfigPatch(density: knobs.density, brightness: knobs.brightness)
             if playing == nil {
                 patch.bpm = vibe.bpm
@@ -270,24 +282,22 @@ final class SkuzicStore: ObservableObject {
                 continue
             }
             mix = next
-            scene = book.isIntro(next) && vibe != book.defaultVibe ? vibe.name : next.mood.label
-            // The pen answers a new mood now; the band takes a few seconds to follow.
-            if !book.isIntro(next), next.mood != playing?.mood { onCue?(next.mood.brightness >= 0.5) }
             let actions = book.mixActions(next, config: patch, vibe: vibe)
             dispatch(actions)
             push(LogEntry(
                 id: 0,
-                event: "Feels like \(next.mood.label): \(next.instruments.map(\.label).joined(separator: " and "))",
+                event: "Feels like \(PaletteBook.title(next)): \(next.instruments.map(\.label).joined(separator: " and "))",
                 reasoning: "\(reasoning) · read in \(Diagnostics.milliseconds(since: started)) ms",
                 actions: actions))
         } while readAgain
     }
 
-    /// Wiping the page lets the band wind down to silence; the next mark brings it back.
+    /// Wiping the page lets the band wind down to silence, and its channels go
+    /// with it; the next mark brings it back.
     func fadeOut() {
         preview?.stop()
         mix = nil
-        scene = nil
+        dispatch(.clearTracks)
         hasPlayed = false
         startNow = false
         if playing { engine.pause(fade: Self.clearFade) }
@@ -296,31 +306,30 @@ final class SkuzicStore: ObservableObject {
     /// Pick where to start. On a blank page that's a preview loop of the vibe and
     /// its channels laid out in the mixer; the band itself starts on the first
     /// mark, in the vibe's tempo. With a drawing already there it switches now.
-    func pickVibe(_ next: Palette.Vibe, blank: Bool, page: @escaping () -> CGImage?) {
+    func pickVibe(_ next: Palette.Vibe, blank: Bool, page: @escaping () -> Page?) {
         guard let book else { return }
         vibeID = next.id
         Preferences.set(next.id, .vibe)
         let opening = book.introMix(next)
-        let calm = Ink.none.config(density: opening.mood.density, brightness: opening.mood.brightness)
+        let feel = PaletteBook.feel(opening)
+        let calm = Ink.none.config(density: feel.density, brightness: feel.brightness)
         let calmPatch = ConfigPatch(density: calm.density, brightness: calm.brightness)
         if blank {
             fadeOut()
             if next == book.defaultVibe { return }
             if preview == nil { preview = VibePreview { [weak self] in self?.previewing = $0 } }
-            preview?.play(next.id, volume: masterVolume)
-            scene = next.name
+            preview?.play(next.id, volume: Self.volume)
             dispatch(book.mixActions(opening, config: calmPatch, vibe: next))
             return
         }
         dispatch(.setConfig(ConfigPatch(bpm: next.bpm, muteDrums: !next.drums)))
-        if autoInterpret, eyesReady {
+        if eyesReady {
             // The music follows the drawing: hear that drawing in the new style.
             mix = nil
             Task { await readDrawing(page) }
             return
         }
         mix = opening
-        scene = next.name
         startNow = true
         dispatch(book.mixActions(opening, config: calmPatch, vibe: next))
     }
@@ -335,7 +344,7 @@ final class SkuzicStore: ObservableObject {
             engine.setConfig(state.config)
             Task { _ = await loadEyes() }
             try await engine.connect()
-            engine.setMasterVolume(masterVolume)
+            engine.setMasterVolume(Self.volume)
 
             // Connect always — even on a blank new sketch — so later drawing can
             // interpret and play without another manual Start tap. Audio itself
@@ -359,7 +368,6 @@ final class SkuzicStore: ObservableObject {
         startNow = false
         resumeOnReturn = false
         mix = nil
-        scene = nil
         preview?.stop(fade: 0.3)
         engine.close()
     }
@@ -417,7 +425,6 @@ final class SkuzicStore: ObservableObject {
             let sanitized = drawing == nil ? 0 : plan.actions.filter { $0.preservingPlayback != $0 }.count
             dispatch(actions)
             Diagnostics.event(.planner, "PLAN_APPLIED id=\(requestID) elapsed_ms=\(Diagnostics.milliseconds(since: startedAt)) actions=\(actions.count) restart_actions_sanitized=\(sanitized) tracks=\(state.tracks.count)")
-            if drawing != nil, !actions.isEmpty { scene = "your page, reimagined" }
             push(
                 LogEntry(
                     id: 0, event: Self.describe(trimmed, drawing: drawing), reasoning: plan.reasoning,

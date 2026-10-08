@@ -1,9 +1,9 @@
 import SwiftUI
 
-/// The band's controls, docked beside the paper: what's playing and why, the
-/// vibe, every sound as a fader, the feel knobs in plain words, and a box to
-/// ask the band for a change. History says what changed and why. A port of
-/// the web build's mixer (src/ui/Mixer.tsx).
+/// The music's controls, docked beside the paper: the vibe, every sound as a
+/// fader, the other knobs folded under Advanced, and a box to ask for a
+/// change. History says what changed and why. A port of the web build's mixer
+/// (src/ui/Mixer.tsx).
 struct MixerPanel: View {
     @EnvironmentObject private var store: SkuzicStore
     let onClose: () -> Void
@@ -12,7 +12,8 @@ struct MixerPanel: View {
     @State private var tab: Tab = .mix
     @State private var choosingVibe = false
     @State private var ask = ""
-    @State private var showMore = false
+    @State private var showAdvanced = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     enum Tab: String, CaseIterable {
         case mix = "Mixer"
@@ -46,9 +47,9 @@ struct MixerPanel: View {
                 VStack(alignment: .leading, spacing: 22) {
                     switch tab {
                     case .mix:
-                        nowPlaying
+                        vibeCard
                         sounds
-                        feel
+                        advanced
                     case .history:
                         ActionLogList()
                     }
@@ -61,20 +62,11 @@ struct MixerPanel: View {
         }
     }
 
-    // MARK: - Now playing
+    // MARK: - Vibe
 
-    private var nowPlaying: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("Now playing")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(Theme.inkMuted)
-            Text(title)
-                .font(.system(size: 26, weight: .semibold))
-                .tracking(-0.5)
-                .foregroundStyle(Theme.ink)
-                .padding(.top, 2)
-
-            if let vibe = store.vibe, let vibes = store.book?.palette.vibes {
+    @ViewBuilder private var vibeCard: some View {
+        if let vibe = store.vibe, let vibes = store.book?.palette.vibes {
+            VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 6) {
                     Text("Vibe").foregroundStyle(Theme.inkMuted)
                     Text(vibe.name).fontWeight(.medium).foregroundStyle(Theme.ink)
@@ -86,7 +78,6 @@ struct MixerPanel: View {
                     .foregroundStyle(Theme.inkMuted)
                 }
                 .font(.system(size: 13))
-                .padding(.top, 12)
 
                 if choosingVibe {
                     LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible())], spacing: 8) {
@@ -100,30 +91,9 @@ struct MixerPanel: View {
                     .padding(.top, 10)
                 }
             }
-
-            Toggle(isOn: $store.autoInterpret) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Follow my drawing")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(Theme.ink)
-                    Text(store.autoInterpret
-                         ? "Lifting your pen changes the music to match the page."
-                         : "The music stays as you set it while you draw.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(Theme.inkMuted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            .toggleStyle(BrandToggleStyle())
-            .padding(.top, 16)
+            .padding(16)
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
         }
-        .padding(16)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-    }
-
-    private var title: String {
-        if let scene = store.scene { return scene.prefix(1).uppercased() + scene.dropFirst() }
-        return store.connected ? "Nothing yet" : "Not playing"
     }
 
     // MARK: - Sounds
@@ -139,97 +109,130 @@ struct MixerPanel: View {
                     .padding(14)
                     .background(Theme.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
-            ForEach(store.state.tracks) { track in
-                ChannelStrip(track: track)
+            ForEach(Self.keyed(store.state.tracks)) { item in
+                ChannelStrip(track: item.track)
+                    .transition(.opacity.combined(with: .offset(y: -4)))
             }
             AddSoundRow(full: store.state.tracks.count >= maxTracks)
         }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.3), value: Self.keyed(store.state.tracks).map(\.id))
     }
 
-    // MARK: - Feel
+    /// A track keyed by name, numbered when two share one.
+    private struct Keyed: Identifiable {
+        let id: String
+        let track: Track
+    }
 
-    private var feel: some View {
+    /// By name, not id: the eyes rebuild the mix with fresh ids whenever the
+    /// page changes scene, and a sound that stays should keep its row rather
+    /// than fade in again with the newcomers.
+    private static func keyed(_ tracks: [Track]) -> [Keyed] {
+        var seen: [String: Int] = [:]
+        return tracks.map { track in
+            let n = seen[track.label, default: 0]
+            seen[track.label] = n + 1
+            return Keyed(id: n == 0 ? track.label : "\(track.label)#\(n)", track: track)
+        }
+    }
+
+    // MARK: - Advanced
+
+    /// Every knob past the sounds, folded under one heading: the drawing and
+    /// Gemini set them as it goes.
+    private var advanced: some View {
         let config = store.state.config
-        return VStack(alignment: .leading, spacing: 8) {
-            SectionHeading(title: "Feel")
-            VStack(alignment: .leading, spacing: 18) {
-                RangeKnob(label: "Energy", low: "Calm", high: "Busy", value: config.density,
+        return DisclosureGroup(isExpanded: $showAdvanced) {
+            VStack(alignment: .leading, spacing: 8) {
+                RangeKnob(label: "Energy", low: "Still", high: "Flowing", value: config.density,
                           display: "\(Int((config.density * 100).rounded()))%") {
                     store.dispatch(.setConfig(ConfigPatch(density: $0)))
                 }
-                RangeKnob(label: "Brightness", low: "Dark", high: "Bright", value: config.brightness,
+                .knobCard()
+                RangeKnob(label: "Brightness", low: "Mellow", high: "Bright", value: config.brightness,
                           display: "\(Int((config.brightness * 100).rounded()))%") {
                     store.dispatch(.setConfig(ConfigPatch(brightness: $0)))
                 }
-                HStack(spacing: 8) {
-                    ToggleChip(title: "Drums", icon: "metronome", on: !config.muteDrums) {
-                        store.dispatch(.setConfig(ConfigPatch(muteDrums: !config.muteDrums)))
-                    }
-                    ToggleChip(title: "Bass", icon: "music.note", on: !config.muteBass) {
-                        store.dispatch(.setConfig(ConfigPatch(muteBass: !config.muteBass)))
-                    }
-                }
-                DisclosureGroup(isExpanded: $showMore) {
-                    VStack(alignment: .leading, spacing: 18) {
-                        RangeKnob(label: "Tempo", low: "Slow", high: "Fast", value: Double(config.bpm),
-                                  range: 60...200, display: "\(config.bpm) bpm") {
-                            store.dispatch(.setConfig(ConfigPatch(bpm: Int($0.rounded()))))
+                .knobCard()
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 8) {
+                        ToggleChip(title: "Drums", icon: "metronome", on: !config.muteDrums) {
+                            store.dispatch(.setConfig(ConfigPatch(muteDrums: !config.muteDrums)))
                         }
-                        VStack(alignment: .leading, spacing: 6) {
-                            HStack {
-                                Text("Key").font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.ink)
-                                Spacer()
-                                Menu {
-                                    Button("Any key") {
-                                        store.dispatch(.setConfig(ConfigPatch(scale: MusicScale.unspecified)))
-                                    }
-                                    ForEach(MusicScale.named, id: \.self) { scale in
-                                        Button(MusicScale.display(scale)) {
-                                            store.dispatch(.setConfig(ConfigPatch(scale: scale)))
-                                        }
-                                    }
-                                } label: {
-                                    Text(MusicScale.display(config.scale))
-                                        .font(.system(size: 13))
-                                        .padding(.horizontal, 12)
-                                        .frame(height: 30)
-                                        .background(Theme.secondary, in: Capsule())
-                                        .foregroundStyle(Theme.ink)
+                        ToggleChip(title: "Bass", icon: "music.note", on: !config.muteBass) {
+                            store.dispatch(.setConfig(ConfigPatch(muteBass: !config.muteBass)))
+                        }
+                    }
+                    HStack {
+                        Text("Key").font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.ink)
+                        Spacer()
+                        Menu {
+                            Button("Any key") {
+                                store.dispatch(.setConfig(ConfigPatch(scale: MusicScale.unspecified)))
+                            }
+                            ForEach(MusicScale.named, id: \.self) { scale in
+                                Button(MusicScale.display(scale)) {
+                                    store.dispatch(.setConfig(ConfigPatch(scale: scale)))
                                 }
                             }
-                            Text("The pen always plays in F, so F maj / D min sounds best with it.")
-                                .font(.system(size: 11))
-                                .foregroundStyle(Theme.inkMuted)
+                        } label: {
+                            Text(MusicScale.display(config.scale))
+                                .font(.system(size: 13))
+                                .padding(.horizontal, 12)
+                                .frame(height: 30)
+                                .background(Theme.secondary, in: Capsule())
+                                .foregroundStyle(Theme.ink)
                         }
-                        RangeKnob(label: "Follow the words", low: "Loose", high: "Strict", value: config.guidance,
-                                  range: 0...6, display: String(format: "%.1f", config.guidance)) {
-                            store.dispatch(.setConfig(ConfigPatch(guidance: $0)))
-                        }
-                        Text("Tempo and key changes restart the music for a moment.")
-                            .font(.system(size: 11))
-                            .foregroundStyle(Theme.inkMuted)
                     }
-                    .padding(.top, 14)
-                } label: {
-                    Text("Tempo, key and more")
-                        .font(.system(size: 13))
-                        .foregroundStyle(Theme.inkMuted)
                 }
-                .tint(Theme.inkMuted)
+                .knobCard()
+                RangeKnob(label: "Tempo", low: "Slow", high: "Fast", value: Double(config.bpm),
+                          range: Double(Calm.bpm.lowerBound)...Double(Calm.bpm.upperBound),
+                          display: "\(config.bpm) bpm") {
+                    store.dispatch(.setConfig(ConfigPatch(bpm: Int($0.rounded()))))
+                }
+                .knobCard()
+                RangeKnob(label: "Follow the words", low: "Loose", high: "Strict", value: config.guidance,
+                          range: Calm.guidance, display: String(format: "%.1f", config.guidance)) {
+                    store.dispatch(.setConfig(ConfigPatch(guidance: $0)))
+                }
+                .knobCard()
+                Text("Tempo and key changes restart the music for a moment.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.inkMuted)
+                    .padding(.horizontal, 4)
             }
-            .padding(16)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .padding(.top, 8)
+        } label: {
+            Text("Advanced")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Theme.inkMuted)
+                .padding(.leading, 4)
         }
+        .tint(Theme.inkMuted)
     }
 
     // MARK: - Ask
 
     private var askBar: some View {
         HStack(spacing: 8) {
-            TextField(store.thinking ? "Rewriting the mix…" : "Ask for a change: “add a saxophone”", text: $ask)
+            TextField(store.thinking ? "" : "Ask for a change: “make it more chill”", text: $ask)
                 .font(.system(size: 13))
                 .submitLabel(.send)
                 .onSubmit(send)
+                .disabled(store.thinking)
+                // While Gemini works the box rests, and its words shimmer in where the hint was.
+                .overlay(alignment: .leading) {
+                    if store.thinking {
+                        Text("Rewriting the mix…")
+                            .font(.system(size: 13))
+                            .foregroundStyle(Theme.inkMuted)
+                            .shimmer()
+                            .allowsHitTesting(false)
+                            .transition(.opacity)
+                    }
+                }
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.3), value: store.thinking)
             Button(action: send) {
                 Image(systemName: "arrow.up")
                     .font(.system(size: 14, weight: .semibold))
@@ -266,6 +269,10 @@ struct MixerPanel: View {
 private struct ChannelStrip: View {
     @EnvironmentObject private var store: SkuzicStore
     let track: Track
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @FocusState private var editing: Bool
+    /// Words that change from outside (Gemini, the eyes) fade in rather than snap.
+    @State private var wordsOpacity = 1.0
 
     /// The web build's channel colours, keyed off the id's number so a sound
     /// keeps its colour when others go.
@@ -315,6 +322,18 @@ private struct ChannelStrip: View {
                 .font(.system(size: 13))
                 .foregroundStyle(Theme.inkMuted)
                 .accessibilityLabel("What \(track.label) plays")
+                .focused($editing)
+                .opacity(wordsOpacity)
+                .onChange(of: track.prompt) {
+                    // Never while you type in it.
+                    guard !editing, !reduceMotion else { return }
+                    var still = Transaction()
+                    still.disablesAnimations = true
+                    withTransaction(still) { wordsOpacity = 0.2 }
+                    DispatchQueue.main.async {
+                        withAnimation(.easeOut(duration: 0.45)) { wordsOpacity = 1 }
+                    }
+                }
             Fader(value: track.volume, tint: tint) {
                 store.dispatch(.setVolume(target: track.id, volume: $0))
             }
@@ -364,5 +383,14 @@ private struct AddSoundRow: View {
         let label = prompt.split(separator: " ").prefix(2).joined(separator: " ")
         store.dispatch(.addTrack(label: label, prompt: prompt, volume: 0.5, origin: "you"))
         draft = ""
+    }
+}
+
+private extension View {
+    /// One knob on its own card, like a sound's.
+    func knobCard() -> some View {
+        frame(maxWidth: .infinity, alignment: .leading)
+            .padding(14)
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 }

@@ -4,7 +4,7 @@ import AVFoundation
 /// Band levels for the equalizer meter, read off a tap on the player node.
 ///
 /// The tap sits ahead of the mixer's output volume, so the meter reads the
-/// music rather than the volume slider — turning down doesn't flatten the bars.
+/// music rather than the master volume, so muting doesn't flatten the bars.
 final class SpectrumAnalyzer {
     /// 1024 at 48kHz is ~21ms per frame: fine enough to follow a beat, coarse
     /// enough that the FFT cost is irrelevant.

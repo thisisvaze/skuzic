@@ -343,7 +343,7 @@ struct Planner {
         SET_CONFIG may set: bpm, scale, density, brightness, guidance, muteBass, muteDrums
 
         CURRENT MIX
-        tracks: \(state.tracks.count) live (style, mood and one or two instruments)
+        tracks: \(state.tracks.count) live (style, a mood for each thing drawn, and one or two instruments)
         \(tracks)
         config: bpm=\(c.bpm) density=\(String(format: "%.2f", c.density)) \
         brightness=\(String(format: "%.2f", c.brightness)) \

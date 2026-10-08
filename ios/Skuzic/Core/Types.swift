@@ -70,6 +70,23 @@ struct MixConfig: Equatable, Codable {
     var muteDrums: Bool = false
 }
 
+/// skuzic only plays calm music, so every setting lives inside a calm band.
+/// Tempo and guidance are held to theirs where config changes land (the
+/// reducer). Energy and brightness keep a 0..1 dial that the page, the sliders
+/// and Gemini all use in full; only the way out to Lyria squeezes it into the
+/// band, so "busy" means as full as calm gets. Same bands as the web's `CALM`.
+enum Calm {
+    static let bpm = 60...100
+    static let guidance = 0.0...5.0
+    static let density = 0.15...0.6
+    static let brightness = 0.35...0.8
+
+    /// A 0..1 dial position, played inside a calm band.
+    static func play(_ band: ClosedRange<Double>, _ dial: Double) -> Double {
+        band.lowerBound + (band.upperBound - band.lowerBound) * dial
+    }
+}
+
 /// Only the fields the planner actually set. Everything else is left alone.
 struct ConfigPatch: Equatable {
     var bpm: Int?

@@ -49,10 +49,15 @@ struct ToolRail: View {
                     canvas.erasing.toggle()
                 }
 
-                RailButton(icon: canvas.penSound ? "waveform" : "waveform.slash", active: false,
-                           help: canvas.penSound ? "Pen sound: on" : "Pen sound: off") {
-                    canvas.penSound.toggle()
+                // Never filled like a selected tool, so it can't pass for a fourth brush: the icon carries the state.
+                RailButton(
+                    icon: canvas.brushSound ? "speaker.wave.2" : "speaker.slash",
+                    active: false,
+                    help: canvas.brushSound ? "Brush sound on" : "Brush sound off"
+                ) {
+                    canvas.brushSound.toggle()
                 }
+
             }
 
             divider

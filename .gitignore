@@ -12,6 +12,8 @@ __pycache__/
 ios/Skuzic/App/Secrets.swift
 ios/build/
 ios/DerivedData/
+# the iPad's 59 MB drawing reader; scripts/make-siglip-coreml.py builds it
+ios/Skuzic/Vision/SiglipEyes.mlpackage/
 *.xcuserdatad
 dist-test/
 .logs/

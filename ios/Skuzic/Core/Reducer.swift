@@ -17,6 +17,10 @@ import Foundation
 
 private func clamp01(_ n: Double) -> Double { min(1, max(0, n)) }
 
+private extension Comparable {
+    func clamped(to range: ClosedRange<Self>) -> Self { min(range.upperBound, max(range.lowerBound, self)) }
+}
+
 /// The model refers to tracks by id when it can, but often uses the label it
 /// invented a moment ago. Accept both, then fall back to fuzzy matching so a
 /// near-miss degrades into the right track instead of a silently dropped action.
@@ -76,10 +80,10 @@ func reduce(_ state: SkuzicState, _ action: Action) -> SkuzicState {
         next.tracks[index].muted = muted
 
     case let .setConfig(patch):
-        if let bpm = patch.bpm { next.config.bpm = min(200, max(60, bpm)) }
+        if let bpm = patch.bpm { next.config.bpm = bpm.clamped(to: Calm.bpm) }
         if let density = patch.density { next.config.density = clamp01(density) }
         if let brightness = patch.brightness { next.config.brightness = clamp01(brightness) }
-        if let guidance = patch.guidance { next.config.guidance = min(6, max(0, guidance)) }
+        if let guidance = patch.guidance { next.config.guidance = guidance.clamped(to: Calm.guidance) }
         if let scale = patch.scale { next.config.scale = scale }
         if let muteBass = patch.muteBass { next.config.muteBass = muteBass }
         if let muteDrums = patch.muteDrums { next.config.muteDrums = muteDrums }

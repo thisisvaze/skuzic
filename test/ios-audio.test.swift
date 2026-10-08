@@ -112,7 +112,7 @@ private struct AudioTests {
             .setConfig(ConfigPatch(bpm: 160, density: 0.7, brightness: 0.2, scale: "D_MAJOR_B_MINOR")),
             .resetContext,
             .addTrack(label: "piano", prompt: "soft piano", volume: 0.7, origin: "drawing"),
-            .setConfig(ConfigPatch(bpm: 140)),
+            .setConfig(ConfigPatch(bpm: 90)),
         ]
         let smooth = actions.compactMap(\.preservingPlayback).reduce(before, reduce)
         check(smooth.config.bpm == 115 && smooth.config.scale == "C_MAJOR_A_MINOR"
@@ -120,7 +120,7 @@ private struct AudioTests {
         check(smooth.config.density == 0.7 && smooth.config.brightness == 0.2
               && smooth.tracks.count == 1, "drawing updates still change the music")
         let manual = actions.reduce(before, reduce)
-        check(manual.config.bpm == 140 && manual.contextEpoch == 4,
+        check(manual.config.bpm == 90 && manual.contextEpoch == 4,
               "explicit controls retain tempo changes and resets")
     }
 

@@ -161,7 +161,8 @@ final class LyriaEngine: ObservableObject {
     private func sendConfig() {
         guard ready else { return }
         var value: [String: Any] = [
-            "bpm": config.bpm, "density": config.density, "brightness": config.brightness,
+            "bpm": config.bpm, "density": Calm.play(Calm.density, config.density),
+            "brightness": Calm.play(Calm.brightness, config.brightness),
             "guidance": config.guidance, "muteBass": config.muteBass, "muteDrums": config.muteDrums,
         ]
         if config.scale != MusicScale.unspecified { value["scale"] = config.scale }

@@ -47,7 +47,7 @@ let planSchema: [String: Any] = [
                     ],
                     "muted": ["type": "BOOLEAN"],
                     "bpm": [
-                        "type": "INTEGER", "minimum": 60, "maximum": 200,
+                        "type": "INTEGER", "minimum": 60, "maximum": 100,
                         "description": "Forces an audible restart.",
                     ],
                     "density": [
@@ -59,7 +59,7 @@ let planSchema: [String: Any] = [
                         "description": "0.0 dark to 1.0 bright.",
                     ],
                     "guidance": [
-                        "type": "NUMBER", "minimum": 0, "maximum": 6,
+                        "type": "NUMBER", "minimum": 0, "maximum": 5,
                         "description": "Prompt adherence.",
                     ],
                     "scale": [

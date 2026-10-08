@@ -47,17 +47,23 @@ final class CanvasController: NSObject, ObservableObject {
     }
     @Published var erasing = false { didSet { applyTool() } }
 
-    /// The pen's own sound: TouchEngine, the web build's src/audio/touch.ts,
-    /// played from the touches PencilKit draws with.
-    @Published var penSound = Preferences.bool(.penSound, or: true) {
+    /// The rail's speaker. Off lets a stroke in progress go quiet at once.
+    @Published var brushSound = Preferences.bool(.brushSound, or: true) {
         didSet {
-            Preferences.set(penSound, .penSound)
-            if !penSound { touch?.up(time: ProcessInfo.processInfo.systemUptime) }
+            Preferences.set(brushSound, .brushSound)
+            if !brushSound { touch.up(time: ProcessInfo.processInfo.systemUptime) }
         }
     }
-    /// The band's level, 0...1, so the pen makes room when the music is loud.
+
+    /// The music's level, 0...1, so the pen makes room when it is loud.
     var meter: () -> Float = { 0 }
-    private var touch: TouchEngine?
+    /// The pen's own sound: TouchEngine, the web build's src/audio/touch.ts,
+    /// played from the touches PencilKit draws with.
+    private lazy var touch: TouchEngine = {
+        let engine = TouchEngine()
+        engine.listen { [weak self] in self?.meter() ?? 0 }
+        return engine
+    }()
 
     @Published private(set) var hasInk = false
     @Published private(set) var canUndo = false
@@ -99,19 +105,8 @@ final class CanvasController: NSObject, ObservableObject {
         canvas.maximumZoomScale = 1
         installGestures()
         applyTool()
-        // Loaded with the sketch so the first stroke already has its piano.
-        _ = sound
-    }
-
-    /// Made on first use, so a silenced pen never loads the piano.
-    private var sound: TouchEngine? {
-        guard penSound else { return nil }
-        if touch == nil {
-            let engine = TouchEngine()
-            engine.listen { [weak self] in self?.meter() ?? 0 }
-            touch = engine
-        }
-        return touch
+        // Built with the sketch, so the paper is ready under the first stroke.
+        _ = touch
     }
 
     /// Procreate's gestures: two fingers to undo, three to redo, anywhere on the
@@ -133,30 +128,26 @@ final class CanvasController: NSObject, ObservableObject {
         listener.draws = { [weak self] in $0.type == .pencil || self?.canvas.drawingPolicy == .anyInput }
         listener.began = { [weak self] in self?.penDown($0) }
         listener.moved = { [weak self] in self?.penMoved($0) }
-        listener.ended = { [weak self] in self?.touch?.up(time: $0.timestamp) }
+        listener.ended = { [weak self] in self?.touch.up(time: $0.timestamp) }
         canvas.addGestureRecognizer(listener)
     }
 
     // MARK: - Pen sound
 
     private func penDown(_ t: UITouch) {
-        guard let sound else { return }
+        guard brushSound else { return }
         let at = t.location(in: canvas)
         let tool: PenTool = erasing ? .eraser : brush == .marker || brush == .watercolor ? .marker : .pencil
-        sound.down(x: at.x, y: at.y, pressure: Self.pressure(t), time: t.timestamp,
+        touch.down(x: at.x, y: at.y, pressure: Self.pressure(t), time: t.timestamp,
                    width: canvas.bounds.width, height: canvas.bounds.height, tool: tool, opacity: opacity)
     }
 
     private func penMoved(_ samples: [UITouch]) {
+        guard brushSound else { return }
         for t in samples {
             let at = t.location(in: canvas)
-            touch?.move(x: at.x, y: at.y, pressure: Self.pressure(t), time: t.timestamp)
+            touch.move(x: at.x, y: at.y, pressure: Self.pressure(t), time: t.timestamp)
         }
-    }
-
-    /// The eyes heard a new scene: the pen answers it.
-    func cue(bright: Bool) {
-        if penSound { touch?.cue(bright: bright) }
     }
 
     /// A Pencil's force as 0...1. A finger or mouse has none and reads as an
@@ -257,7 +248,7 @@ final class CanvasController: NSObject, ObservableObject {
         canvas.drawing = PKDrawing()
         refresh()
         guard hadInk else { return }
-        if penSound { touch?.clear() }
+        if brushSound { touch.clear() }
         onClear?()
     }
 
@@ -277,10 +268,50 @@ final class CanvasController: NSObject, ObservableObject {
 
     var isEmpty: Bool { canvas.drawing.strokes.isEmpty }
 
-    /// The page for the eyes and the ink reader: strokes on paper, small enough
-    /// to read in milliseconds (SigLIP sees 224 x 224 anyway). Nil when blank.
-    func pageImage() -> CGImage? {
-        isEmpty ? nil : render(maxEdge: 448)?.cgImage
+    /// The page for the eyes and the ink reader: its strokes for grouping into
+    /// figures, crops around those, and the whole sheet small enough to read in
+    /// milliseconds. Nil when blank.
+    func page() -> Page? {
+        guard !isEmpty, let image = render(maxEdge: 448)?.cgImage else { return nil }
+        let drawing = canvas.drawing
+        let marks = drawing.strokes.map { stroke in
+            Mark(id: Self.id(of: stroke), color: Self.hex(stroke.ink.color),
+                 points: stroke.path.interpolatedPoints(by: .distance(4)).map { $0.location.applying(stroke.transform) })
+        }
+        return Page(marks: marks, size: canvas.bounds.size, image: image, crop: { Self.crop($0, of: drawing) })
+    }
+
+    /// Unique per stroke, and changed when the bitmap eraser trims it, which
+    /// PencilKit does by masking or splitting the stroke in place.
+    private static func id(of stroke: PKStroke) -> String {
+        "\(stroke.path.creationDate.timeIntervalSinceReferenceDate) \(stroke.renderBounds) \(stroke.mask?.bounds ?? .null)"
+    }
+
+    private static func hex(_ color: UIColor) -> String {
+        var (r, g, b, a): (CGFloat, CGFloat, CGFloat, CGFloat) = (0, 0, 0, 0)
+        color.getRed(&r, green: &g, blue: &b, alpha: &a)
+        return String(format: "%02x%02x%02x", Int(r * 255), Int(g * 255), Int(b * 255))
+    }
+
+    /// A 224-point square of the drawing around a figure, padded by a fifth, on
+    /// paper: the framing scripts/embed-palette.py taught the eyes.
+    private static func crop(_ box: CGRect, of drawing: PKDrawing) -> CGImage? {
+        let side = max(box.width, box.height) * 1.2 + 24
+        let rect = CGRect(x: box.midX - side / 2, y: box.midY - side / 2, width: side, height: side)
+        let frame = CGRect(x: 0, y: 0, width: 224, height: 224)
+        var strokes = UIImage()
+        // Light, for the same reason as `render`: dark would invert the ink.
+        UITraitCollection(userInterfaceStyle: .light).performAsCurrent {
+            strokes = drawing.image(from: rect, scale: frame.width / side)
+        }
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        return UIGraphicsImageRenderer(size: frame.size, format: format).image { context in
+            Theme.paperUI.setFill()
+            context.fill(frame)
+            strokes.draw(in: frame)
+        }.cgImage
     }
 
     /// The canvas can be 2732px on the long edge, but the planner only needs the

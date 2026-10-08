@@ -139,7 +139,6 @@ struct ContentView: View {
                 guard let bands = store.levels(bands: 4), !bands.isEmpty else { return 0 }
                 return bands.reduce(0, +) / Float(bands.count)
             }
-            store.onCue = { canvas.cue(bright: $0) }
             if let saved = sketches.loadDrawing(sketch.id) { canvas.load(saved) }
             store.adopt(sketches.loadState(sketch.id))
             store.noteCanvasHasInk(canvas.hasInk)
@@ -170,9 +169,6 @@ struct ContentView: View {
             // Strokes made during a request must still update the final mix.
             if !thinking, autoInterpretPending { interpretIfAuto() }
         }
-        .onChange(of: store.autoInterpret) { _, enabled in
-            if enabled { follow() } else { cancelAutoInterpret() }
-        }
         .onChange(of: scenePhase) { _, phase in
             // Backgrounding can be followed by termination, so commit to disk.
             if phase == .background {
@@ -186,7 +182,6 @@ struct ContentView: View {
             canvas.onStrokeEnd = nil
             canvas.onClear = nil
             canvas.meter = { 0 }
-            store.onCue = nil
         }
     }
 
@@ -289,17 +284,17 @@ struct ContentView: View {
     // MARK: - Actions
 
     private func pick(_ vibe: Palette.Vibe) {
-        store.pickVibe(vibe, blank: !canvas.hasInk, page: { [canvas] in canvas.pageImage() })
+        store.pickVibe(vibe, blank: !canvas.hasInk, page: { [canvas] in canvas.page() })
     }
 
     /// Lifting the pen: read the page with the eyes, or, where they can't run,
     /// fall back to asking Gemini after a pause.
     private func follow() {
-        guard store.autoInterpret, store.connected, onScreen else { return }
+        guard store.connected, onScreen else { return }
         if store.eyesUnavailable {
             interpretIfAuto()
         } else {
-            Task { await store.readDrawing { [canvas] in canvas.pageImage() } }
+            Task { await store.readDrawing { [canvas] in canvas.page() } }
         }
     }
 
@@ -332,7 +327,7 @@ struct ContentView: View {
     }
 
     private func interpretIfAuto() {
-        guard store.autoInterpret, store.connected, canvas.hasInk, onScreen else { return }
+        guard store.connected, canvas.hasInk, onScreen else { return }
         autoInterpretPending = true
         cancelAutoInterpret(clearPending: false)
         guard !canvas.isDrawing else { return }
@@ -362,6 +357,8 @@ private struct MiniPlayer: View {
     var compact = false
     let onNeedKey: () -> Void
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
         HStack(spacing: 10) {
             button
@@ -371,19 +368,15 @@ private struct MiniPlayer: View {
             }
             Text(status)
                 .font(.system(size: 13))
-                .foregroundStyle(Theme.ink)
+                .foregroundStyle(store.thinking ? Theme.inkMuted : Theme.ink)
                 .lineLimit(1)
+                .shimmer(store.thinking)
+                .contentTransition(.opacity)
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.3), value: status)
             if store.status == .error {
                 Button("Retry") { Task { await store.start() } }
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(Theme.ink)
-            }
-            if store.connected, !compact {
-                Slider(value: Binding(get: { Double(store.masterVolume) },
-                                      set: { store.masterVolume = Float($0) }), in: 0...1)
-                    .tint(Theme.ink)
-                    .frame(width: 90)
-                    .accessibilityLabel("Volume")
             }
         }
         .padding(.leading, 4)
@@ -412,15 +405,15 @@ private struct MiniPlayer: View {
 
     private var status: String {
         if !store.hasKey { return "Add a key to play" }
-        if store.status == .connecting { return "Starting the band…" }
-        if store.status == .error { return "The band dropped out" }
+        if store.status == .connecting { return "Starting the music…" }
+        if store.status == .error { return "The music dropped out" }
         if let id = store.previewing, !store.playing, let book = store.book {
             return "\(book.vibe(id).name), a preview"
         }
         if !store.connected { return "Not playing" }
         if store.thinking { return "Reimagining…" }
         if store.status == .paused { return "Paused" }
-        if let scene = store.scene { return scene.prefix(1).uppercased() + scene.dropFirst() }
+        if store.playing { return "Now playing" }
         return "Draw anything"
     }
 }
