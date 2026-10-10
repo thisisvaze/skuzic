@@ -4,9 +4,7 @@ import { ChevronDown, Monitor, Moon, Sun, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { penVoice, type PenVoice } from '../audio/touch';
 import type { Backend } from '../core/types';
-import { KEYS, save } from '../lib/persist';
 import { PLANNER_CONFIG_LIST, type PlannerConfigId } from '../llm/configs';
 import { PLANNER_MODELS, type PlannerModel } from '../llm/planner';
 import './settings.css';
@@ -132,8 +130,6 @@ export function Settings({
   theme, onThemeChange, connected, onDisconnect,
 }: Props) {
   const [dialog, setDialog] = useState<HTMLDialogElement | null>(null);
-  // The pen reads this on every stroke, so it needs no wiring through the app.
-  const [voice, setVoice] = useState(penVoice);
   const titleId = useId();
   useEffect(() => {
     if (open && !dialog?.open) dialog?.showModal();
@@ -173,19 +169,6 @@ export function Settings({
               options={PLANNER_CONFIG_LIST.map((c) => ({ id: c.id, label: c.label }))}
               hint={RESPONSE_HINTS[plannerConfig]}
               onChange={onPlannerConfigChange}
-            />
-            <SettingSelect<PenVoice>
-              container={dialog}
-              label="Brush sounds"
-              value={voice}
-              options={[{ id: 'brushes', label: 'Pluck and swell' }, { id: 'piano', label: 'Piano' }]}
-              hint={voice === 'piano'
-                ? 'Soft piano notes for every brush.'
-                : 'The pencil plucks and the watercolor swells. Try both while you draw.'}
-              onChange={(next) => {
-                setVoice(next);
-                save(KEYS.penVoice, next);
-              }}
             />
           </section>
 

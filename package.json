@@ -19,7 +19,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "test": "vite build --config vite.test.config.ts && node dist-test/core.test.js && vite build --config vite.mixer.config.ts && node dist-test/mixer.test.js"
+    "test": "vite build --config vite.test.config.ts && node dist-test/core.test.js && node dist-test/perception.test.js && vite build --config vite.mixer.config.ts && node dist-test/mixer.test.js && node test/relay.test.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.13.0",

@@ -3,6 +3,8 @@
  * chunks and plays them back gapless on the Web Audio clock.
  */
 
+import type { Lead } from './engine';
+
 const DEFAULT_SAMPLE_RATE = 48000;
 const CHANNELS = 2;
 
@@ -23,11 +25,23 @@ const MAX_LEAD = 3;
 const RESTART_FADE = 0.02;
 
 /**
- * A context reset drops every queued buffer, so there is an unavoidable gap
- * while the model regenerates. Ducking either side of it turns a click plus
- * abrupt re-entry into a deliberate-sounding swell.
+ * Where the music changes (a reset, or a new tempo or key), the old music plays
+ * out what is queued and fades into the new chunk, which fades up. About a
+ * second is still queued when a chunk lands, so it's a short dip, not a gap.
  */
-const RESET_DUCK = 0.15;
+const SWAP_FADE = 0.5;
+
+/**
+ * The hand's lead glides in with this time constant, holds this long after the
+ * last call, then settles back with this one (about 3 s all told). Quick to
+ * rise and slow to settle, so the music follows the hand without pumping in
+ * the gaps between strokes.
+ */
+const LEAD_ATTACK = 0.25;
+const LEAD_HOLD = 0.4;
+const LEAD_RELEASE = 0.9;
+/** Where the lead's top-end tilt starts, in Hz. */
+const LEAD_SHELF_HZ = 3000;
 
 /** Meter range. Above ~8k there is little musical energy to show. */
 const METER_MIN_HZ = 40;
@@ -50,6 +64,10 @@ export class PcmScheduler {
   private ctx: AudioContext;
   private gain: GainNode;
   private analyser: AnalyserNode;
+  /** The hand's lead: a top-end tilt, the side signal for width, and a level, all untouched at rest. */
+  private tone: BiquadFilterNode;
+  private side: GainNode;
+  private lift: GainNode;
   // Explicit ArrayBuffer: getByteFrequencyData rejects a possibly-shared buffer.
   private spectrum?: Uint8Array<ArrayBuffer>;
   private nextTime = 0;
@@ -70,8 +88,8 @@ export class PcmScheduler {
   private volume: number;
   private muted = false;
   private muteTimer: ReturnType<typeof setTimeout> | null = null;
-  /** Set by reset(); the next chunk to land fades in instead of cutting in. */
-  private fadeInNext = false;
+  /** Set by reset(); the next chunk to land is where the music changes. */
+  private swapNext = false;
 
   constructor(volume = 0.8) {
     this.ctx = new AudioContext({ sampleRate: DEFAULT_SAMPLE_RATE });
@@ -79,9 +97,9 @@ export class PcmScheduler {
     this.gain = this.ctx.createGain();
     this.gain.gain.value = volume;
 
-    // Sources -> analyser -> gain -> out. Tapping ahead of the gain keeps the
-    // meter reading the music rather than the master volume, so muting an
-    // A/B arm doesn't flatten the bars.
+    // Sources -> analyser -> lead -> gain -> out. Tapping ahead of the gain
+    // keeps the meter reading the music rather than the master volume, so
+    // muting an A/B arm doesn't flatten the bars.
     this.analyser = this.ctx.createAnalyser();
     this.analyser.fftSize = 256;
     this.analyser.smoothingTimeConstant = 0.72;
@@ -89,8 +107,23 @@ export class PcmScheduler {
     // every band read as nearly full and the meter sat at its maximum.
     this.analyser.minDecibels = -90;
     this.analyser.maxDecibels = -10;
-    this.analyser.connect(this.gain);
-    this.gain.connect(this.ctx.destination);
+
+    // Width as mid/side: the side signal (L - R) / 2, scaled by width - 1, is
+    // added to the left and taken from the right. At 0 dB, 0 and 1 the lead
+    // passes the music through untouched.
+    this.tone = new BiquadFilterNode(this.ctx, { type: 'highshelf', frequency: LEAD_SHELF_HZ, gain: 0 });
+    this.side = new GainNode(this.ctx, { gain: 0 });
+    this.lift = new GainNode(this.ctx);
+    const split = new ChannelSplitterNode(this.ctx, { numberOfOutputs: 2 });
+    const merge = new ChannelMergerNode(this.ctx, { numberOfInputs: 2 });
+    this.analyser.connect(this.tone).connect(split);
+    split.connect(merge, 0, 0);
+    split.connect(merge, 1, 1);
+    split.connect(new GainNode(this.ctx, { gain: 0.5 }), 0).connect(this.side);
+    split.connect(new GainNode(this.ctx, { gain: -0.5 }), 1).connect(this.side);
+    this.side.connect(merge, 0, 0);
+    this.side.connect(new GainNode(this.ctx, { gain: -1 })).connect(merge, 0, 1);
+    merge.connect(this.lift).connect(this.gain).connect(this.ctx.destination);
 
     this.volume = volume;
   }
@@ -143,12 +176,12 @@ export class PcmScheduler {
   }
 
   /** Lyria path: base64 chunks with the rate carried in the MIME type. */
-  enqueue(base64: string, mimeType?: string): void {
-    this.enqueueBytes(base64ToBytes(base64), sampleRateFrom(mimeType));
+  enqueue(base64: string, mimeType?: string, swap = false): void {
+    this.enqueueBytes(base64ToBytes(base64), sampleRateFrom(mimeType), swap);
   }
 
   /** Magenta bridge path: raw interleaved int16 over a binary WebSocket frame. */
-  enqueueBytes(bytes: Uint8Array, rate: number = DEFAULT_SAMPLE_RATE): void {
+  enqueueBytes(bytes: Uint8Array, rate: number = DEFAULT_SAMPLE_RATE, swap = false): void {
     // Chunks that land once a mute has faded out would play silently and leave
     // a stale tail to resume with. During the fade they keep the music going;
     // dropping them there made a long fade run dry and cut off instead.
@@ -177,15 +210,16 @@ export class PcmScheduler {
     }
     this.flowing = true;
 
-    // First chunk back after a reset: swell in exactly where the audio starts,
-    // rather than arriving at full level mid-gap.
-    if (this.fadeInNext) {
-      this.fadeInNext = false;
+    // The chunk where the music changes: fade what is queued out into it, and
+    // it in, so the seam is a dip rather than a jump. Added without a cancel,
+    // which would wipe an earlier swap's dip that hasn't played yet.
+    if (swap || this.swapNext) {
+      this.swapNext = false;
       if (!this.muted) {
         const at = this.nextTime;
-        this.gain.gain.cancelScheduledValues(at);
-        this.gain.gain.setValueAtTime(0, at);
-        this.gain.gain.linearRampToValueAtTime(this.volume, at + RESET_DUCK);
+        this.gain.gain.setValueAtTime(this.volume, Math.max(this.ctx.currentTime, at - SWAP_FADE));
+        this.gain.gain.linearRampToValueAtTime(0, at);
+        this.gain.gain.linearRampToValueAtTime(this.volume, at + SWAP_FADE);
       }
     }
 
@@ -207,28 +241,15 @@ export class PcmScheduler {
   }
 
   /**
-   * Duck out, drop the queue, then hand back so the caller can reset the model
-   * while nothing is audible. The next chunk fades back in.
-   *
-   * `onSilent` fires at the bottom of the duck — that is the moment to tell the
-   * model to restart, so its gap lands inside our silence rather than beside it.
+   * Tell the model to restart now and swap on the next chunk. Dropping the
+   * queue instead left a 2-3 s silence that read as the music cutting off.
+   * ponytail: a chunk already in flight is still old music and takes the
+   * swap; callers that can tell the new chunk apart pass `swap` instead.
    */
-  reset(onSilent: () => void): void {
-    const now = this.ctx.currentTime;
-    if (!this.muted) {
-      this.gain.gain.cancelScheduledValues(now);
-      this.gain.gain.setValueAtTime(this.gain.gain.value, now);
-      this.gain.gain.linearRampToValueAtTime(0, now + RESET_DUCK);
-    }
-
-    setTimeout(
-      () => {
-        this.flush();
-        this.fadeInNext = true;
-        onSilent();
-      },
-      this.muted ? 0 : RESET_DUCK * 1000,
-    );
+  reset(onReset: () => void): void {
+    onReset();
+    this.swapNext = true;
+    if (this.muted) this.flush();
   }
 
   setVolume(v: number): void {
@@ -236,6 +257,19 @@ export class PcmScheduler {
     // While muted the level is remembered but not applied, so setting the
     // volume during a pause can't undo the mute.
     if (!this.muted) this.gain.gain.setTargetAtTime(v, this.ctx.currentTime, 0.05);
+  }
+
+  /** Lean the music with the hand: glide to `lead` now, and back to untouched unless another call follows. */
+  lead({ lift, tone, width }: Lead): void {
+    const now = this.ctx.currentTime;
+    const glide = (param: AudioParam, to: number, rest: number) => {
+      param.cancelScheduledValues(now);
+      param.setTargetAtTime(to, now, LEAD_ATTACK);
+      param.setTargetAtTime(rest, now + LEAD_HOLD, LEAD_RELEASE);
+    };
+    glide(this.lift.gain, 10 ** (lift / 20), 1);
+    glide(this.tone.gain, tone, 0);
+    glide(this.side.gain, width - 1, 0);
   }
 
   /** Cancel any in-flight ramp and hold wherever the gain currently sits. */

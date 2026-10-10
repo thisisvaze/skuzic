@@ -69,6 +69,8 @@ function summarize(action: Action): string {
         .join(' · ');
     case 'SET_BACKEND':
       return `engine: ${action.backend}`;
+    case 'SET_SOUND_EFFECTS':
+      return action.enabled ? 'sound effects' : 'music in your chosen vibe';
     case 'SET_CONFIG_LOCK':
       return action.locked ? 'locked a control' : 'unlocked a control';
     case 'CLEAR_TRACKS':

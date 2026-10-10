@@ -16,8 +16,6 @@ export const KEYS = {
   brushSize: 'skuzic_brush_size',
   brushOpacity: 'skuzic_brush_opacity',
   medium: 'skuzic_medium',
-  brushSound: 'skuzic_brush_sound',
-  penVoice: 'skuzic_pen_voice',
   theme: 'skuzic_theme',
   mixerOpen: 'skuzic_mixer_open',
   vibe: 'skuzic_vibe',

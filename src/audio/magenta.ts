@@ -4,6 +4,7 @@ import {
   type EngineCapabilities,
   type EngineEvents,
   type EngineStatus,
+  type Lead,
   type MusicEngine,
   type PromptWeight,
 } from './engine';
@@ -177,13 +178,16 @@ export class MagentaEngine implements MusicEngine {
       this.send({ type: 'reset' });
       return;
     }
-    // Duck first so the bridge's regeneration gap lands inside our silence.
     this.scheduler.reset(() => this.send({ type: 'reset' }));
   }
 
   setMasterVolume(volume: number): void {
     this.masterVolume = volume;
     this.scheduler?.setVolume(volume);
+  }
+
+  lead(lead: Lead): void {
+    this.scheduler?.lead(lead);
   }
 
   getLevels(bands: number): number[] | null {

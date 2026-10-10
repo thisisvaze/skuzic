@@ -193,11 +193,6 @@ function Start({
       ) : (
         <p className="experiment-note">The studio opens on a desktop or laptop.</p>
       )}
-      {onStart && !returning && (
-        <p className="experiment-note">
-          {demo ? 'Free to play. No sign-up.' : "Connect a free Gemini key to begin. It stays in your browser."}
-        </p>
-      )}
     </div>
   );
 }

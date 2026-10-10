@@ -17,7 +17,6 @@
   font-size: 1.125rem;
   font-weight: 700;
   line-height: 1;
-  cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   box-shadow: 0 2px 4px rgb(32 77 119 / 8%);
 }

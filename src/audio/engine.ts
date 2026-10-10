@@ -10,6 +10,17 @@ export interface PromptWeight {
 }
 
 /**
+ * The hand leading the music (src/audio/touch.ts), as offsets from the mix as
+ * the model made it: `lift` and `tone` (a top-end tilt) in dB, and stereo
+ * `width` where 1 is untouched.
+ */
+export interface Lead {
+  lift: number;
+  tone: number;
+  width: number;
+}
+
+/**
  * The two backends expose genuinely different control surfaces. Lyria takes
  * musical parameters (bpm, scale, density); MRT2 conditions on blended style
  * embeddings and has no notion of tempo or key at all. The UI and the planner
@@ -47,6 +58,8 @@ export interface MusicEngine {
   stop(): void;
   resetContext(): void;
   setMasterVolume(volume: number): void;
+  /** Lean the music's sound with the hand now; once the calls stop it settles back to untouched by itself. */
+  lead(lead: Lead): void;
   /** Band energies 0..1 for a meter, or null before audio is running. */
   getLevels(bands: number): number[] | null;
   /** Seconds of audio queued ahead of the playhead, read live — 0 means a starved stream. */

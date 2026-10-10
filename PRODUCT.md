@@ -14,7 +14,7 @@ Two secondary audiences follow from the confirmed success goals: builders who wa
 
 ## Product Purpose
 
-skuzic is for making art with music: you draw, and the music plays along. It is not a music maker (the user, 2026-10-07: "the idea of this app is not to make music - but do art with music"). Every stroke sounds in key straight away; when you lift the pen the page is read and the music follows, so one continuous song bends around the drawing.
+skuzic is for making art with music: you draw, and the music plays along. It is not a music maker (the user, 2026-10-07: "the idea of this app is not to make music - but do art with music"). The music leans with your hand straight away; when you lift the pen the page is read and the music follows, so one continuous song bends around the drawing.
 
 Success right now (all three confirmed):
 
@@ -24,7 +24,7 @@ Success right now (all three confirmed):
 
 ## Positioning
 
-The song never stops or restarts; it bends to the page. Three things together make that true: the pen sounds instantly on the device (a paper texture under every stroke), an image model reads the whole page in the browser on pen-up (SigLIP 2, nothing uploaded), and Lyria RealTime streams one continuous piece that follows the reading. Drawing is the only input a visitor needs; no music knowledge, prompts or settings.
+The song never stops or restarts; it bends to the page. Three things together make that true: the pen answers instantly on the device (a paper texture under every stroke, and the music leaning with your hand), an image model reads the whole page in the browser on pen-up (SigLIP 2, nothing uploaded), and Lyria RealTime streams one continuous piece that follows the reading. Drawing is the only input a visitor needs; no music knowledge, prompts or settings.
 
 ## Operating Context
 
@@ -50,13 +50,13 @@ The song never stops or restarts; it bends to the page. Three things together ma
 - Name: "skuzic", always lowercase.
 - Line: "Make art with music." (since 2026-10-07; the landing headline and page title). The README and social card still carry the older "Draw something. Hear it turn into music." until they are redone.
 - Voice: plain, warm and concrete, in short sentences; it describes what you hear and do before the technology. No em dashes in copy. Credits the author as "An experiment by Aaditya Vaze."
-- Terminology: call it "the music", never "the band" (the user's call, 2026-10-07). Layers are style, mood and instrument; a vibe is a starting style; "your pen" is the instant sound under the nib. The primary action is "Start drawing", never "Make music".
+- Terminology: call it "the music", never "the band" (the user's call, 2026-10-07). On the web, layers represent the drawing's moods and instruments; a vibe is the style they are played in, with no separate Style channel or intensity. "Your pen" is the instant sound under the nib. The primary action is "Start drawing", never "Make music".
 - Bar: Apple-level polish, and music that stays bright and enjoyable over a long session.
 
 ## Evidence on Hand
 
 - Product screenshots: `docs/cover-light.jpg`, `docs/cover-dark.jpg` (2560×1280), `.github/social-preview.jpg`.
-- Real audio: vibe preview loops in `public/sounds/vibes/` (lofi, ambient, piano, folk, bossa, jazz, strings). The pen's old piano samples (`public/sounds/piano-*.mp3`, CC0 Versilian Kawai grand) are unused since the piano layer was removed.
+- Real audio: vibe preview loops in `public/sounds/vibes/` (lofi, ambient, piano, folk, bossa, jazz, strings).
 - Existing wordmark: a pencil line that is also a sound wave (`Wordmark` in `src/ui/Landing.tsx`), also in the studio header.
 - Measured facts, with their source in `docs/how-it-works.md`: SigLIP reads a page in 21 to 30 ms on WebGPU; 12 of 12 test drawings landed in the right mood; a listening test raised enjoyment from 7.0 to 7.3 on Lyria and from 6.3 to 7.5 on Magenta.
 - Absent: press, testimonials, user counts and ratings. Never invent them.

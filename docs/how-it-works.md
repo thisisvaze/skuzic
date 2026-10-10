@@ -3,8 +3,8 @@
 You draw. Every stroke rings in key straight away, from a small sound engine
 in the browser. When you lift the pen, SigLIP 2 reads the page, also in the
 browser, and composes a mix from a hand-written **palette** of moods and
-instruments. Tap **Reimagine**,
-or tell the band something, and a Gemini planner reads the page instead and
+instruments. Tap **Reimagine** at the bottom of the mixer,
+or type a change in the same box, and a Gemini planner reads the page instead and
 writes its own **actions** (`ADD_TRACK`, `SET_VOLUME`, `MODIFY_TRACK`, …).
 Either way a pure reducer applies the actions to state, and the state is
 continuously synced to
@@ -41,10 +41,17 @@ meant to be steered:
 
 | Layer | Example | Lyria | Magenta |
 | --- | --- | --- | --- |
-| style, all session | "dreamy lo-fi hip hop" ("lo-fi hip hop" on Magenta) | 1.0 | 1.0 |
 | a mood for each thing drawn | "gentle and bittersweet" | 0.45, shared | 0.8, shared |
 | lead instrument, from the page | "soft felt piano melody" | 0.6 | 0.6 |
 | second instrument | "warm Rhodes chords" | 0.4 | 0.4 |
+
+On the web, style is context rather than a weighted channel. At the audio
+boundary, `src/core/music-prompts.ts` folds the selected genre into the first
+audible drawing prompt, once, at that layer's existing weight. No extra prompt
+or weight is added. The editable words stay about the drawing; if that layer
+is muted or removed, the next audible one carries the cue. A fully muted or
+empty mix stays silent. All playback paths, including A/B auditions, share
+this conversion. Literal Sound effects plans bypass the musical cue.
 
 The palette offers 100 things a drawing can show (`moods` in `palette.json`),
 from a sun, rain or a bike to squiggles, each with its own mood. SigLIP doesn't
@@ -62,21 +69,27 @@ Every object starts as one stroke, and one stroke reads as squiggles, so the
 figure being drawn has no say until it reads clearly as a thing or has three
 strokes. Marks (squiggles, dots, spirals, writing) count half, and only from a
 figure they lead, so a lone horizon line can't outweigh what the page shows.
-The instruments are ranked against all the figures together. An empty page, or
-first marks nothing on the page can be placed yet, play the vibe's opening:
-"soft and unhurried" over its first instrument. How much ink is down and how
-warm its colours are (`src/vision/ink.ts`) nudge density and brightness on
-every reading, so the music grows as the page fills. A Gemini arrangement
-survives until the drawing reads as something new.
+The instruments come from the things, not the page's look: each thing pulls
+toward the instruments whose text vectors sit near its own (mountains to
+strings, water to harp, clouds to pads), less each instrument's average pull, so
+none wins everywhere. The look was mostly colour, and blue mountains played
+harp. An empty page, or first marks nothing on the page can be placed yet, play
+the vibe's opening: "soft and unhurried" over its first instrument. Warm
+colours open brightness (`src/vision/ink.ts`). Density follows the hand, never
+how full the page is: it swells while the pen draws (3 s to rise) and eases
+back below the page's own level while it rests (6 s to fall), checked once a
+second, so the music moves like a wave with the drawing instead of piling up.
+Gemini's refine sets the resting level and never sees the swell, so it can't
+ratchet. A Gemini arrangement survives until the drawing reads as something new.
 
 Gemini follows along (Settings, on by default). SigLIP names things but in stock
 words: it can't see colour, line or story, so violet water and blue water got
 the same "flowing and serene". Every 3.5 seconds at most, and only while the page
 keeps changing, the selected Gemini model looks at the page and rewrites the
-words of every layer but Style for this drawing, with density and brightness
+words of every layer for this drawing within the selected vibe, with density and brightness
 (`refine` in `src/llm/planner.ts`, its own short instruction and a reply shape
 that requires a line per layer: under the arranger's instruction Gemini only
-ever moved the knobs). It can't add, remove or clear layers, touch the style,
+ever moved the knobs). It can't add, remove or clear layers, change the selected vibe,
 or change tempo or key (`keepRefinement`), so SigLIP keeps deciding what is on
 the page. Its words and knob settings carry over when SigLIP adds or drops a
 thing, and the ink stops nudging knobs Gemini has set. Measured on calm blue
@@ -95,10 +108,12 @@ doodles came out right 37% of the time, and nine misses in ten landed on
 "energy" (now squiggles).
 
 The artist can start from a **vibe** (`vibes` in `palette.json`, picked on the
-blank page or in the mixer). A vibe sets the style layer for each engine, the
+blank page or in the mixer). On the web, a vibe sets the musical context for each engine, the
 instruments it opens with, the only instruments a drawing may bring in, and its
-tempo and drums. So a string quartet never grows a kalimba, and solo piano has
-no instruments at all, only its style and the mood.
+tempo and drums. Gemini also receives the selected vibe and its instrument
+palette on both Reimagine and refinement requests. It describes the drawing's
+musical details inside that idiom, without creating a Style channel. Solo
+piano supplies its instrument through the genre cue on the drawing's mood.
 
 On a blank page, tapping a vibe plays a short loop of it at once
 (`public/sounds/vibes/`, rendered by `scripts/make-vibe-previews.py`) and lays
@@ -108,14 +123,16 @@ fades back to silence. With a drawing already on the page, picking a vibe
 switches the band straight away. Wiping the page fades the band out over three
 seconds rather than cutting it, and the next mark brings it back.
 
-This shape won a listening test: four drawings, seven prompt styles, both
+The earlier separate-style-layer shape was chosen by a listening test: four drawings, seven prompt styles, both
 engines, scored with Audiobox Aesthetics plus an in-key measure. One sentence
 per track with the genre in every prompt (the old scenes) scored lowest and
 made every drawing sound alike. Bare one-line prompts let the genre drift
 between drawings and once collapsed on Magenta. Short layers scored best on
 both, and enjoyment went from 7.0 to 7.3 on Lyria and from 6.3 to 7.5 on
 Magenta. The two engines want different balances, so `palette.json` holds one
-per engine and switching engines re-weights the mix.
+per engine and switching engines re-weights the mix. Those scores predate the
+web's change to style as context; the new balance still needs a listening
+comparison. The native iOS port currently retains the separate style layer.
 
 The q4 export is deliberate: every half-precision export (fp16, q4f16) drifts
 to about 0.6 cosine against PyTorch on this model, while q4 holds 0.97. Measured
@@ -131,36 +148,102 @@ web's palette files rather than copying them, so the two can't drift apart. The
 model isn't checked in, so run the script once before building; without it the
 app asks Gemini too.
 
+## Perception rebuild (in progress, dev builds only)
+
+`src/perception/` is a new core that reads what a drawing looks like instead
+of what it shows, built beside the eyes so the two can be compared. Nothing in
+it reaches visitors yet. Open it with **Lab** in the header of `pnpm dev`, or
+`/app?lab`.
+
+Three sources stay apart until the music needs them:
+
+- **The live gesture** (`gesture.ts`): speed, bending, sharp corners, pressure
+  and an overall energy, from every pointer sample, bounded, and fading once
+  the pen lifts.
+- **The visible artwork** (`measure.ts`, in `measure.worker.ts`): the page as
+  rendered, read a few times a second while drawing and at every pen-up.
+  Observations only: mark lightness, contrast, density, blank paper, line
+  weight, texture, edge softness, colour, where the ink sits, and from the
+  strokes themselves curvature and angularity. The whole page and a region
+  around the latest change are read alike; the region is plain geometry with a
+  ring of page around it, so a new colour over an old form is read with the
+  form.
+- **The model's interpretation** (`probes.ts`): SigLIP 2 asked one question
+  per quality ("flowing" against "stiff"), each scored on its own from a probe
+  vector (`scripts/embed-probes.py`), never competing for one label.
+
+Every reading carries its source, whether it is an observation or an
+interpretation, how much evidence backs it, and the page version it came
+from. Each kind of reading has one job in flight; requests that arrive
+meanwhile collapse onto the newest page, and nothing read before a clear,
+undo, redo or erasure lands afterwards (`Lane` in `state.ts`). A failed model
+leaves the measurements and the music running.
+
+`mapping.ts` turns the readings into a few musical targets, as hypotheses to
+tune by ear: lighter marks play higher, a fuller page plays fuller, soft edges
+play gently, angular lines play punctuated, open paper plays spacious. Two
+engines can play them: a local prototype voice (`voice.ts`: soft FM keys, a
+pad and a bass in F major at 90 bpm, Lyria's key and tempo), and Lyria itself
+(`stream.ts`: a word layer per axis whose weight follows the target, plus
+density and brightness, at most every two seconds).
+
+In Lyria mode the instruments come from what the art is made of, not what it
+shows (`timbre.ts`). Each instrument has an attack (bowed and blown to plucked
+and struck), a register, and for some a colour after Kandinsky's
+correspondences: light blue a flute, deep blue a cello, green the violins,
+violet a clarinet for his reeds, warm red a French horn, orange a vibraphone
+for his bell, yellow a glockenspiel. Black and grey carry no colour, so a
+graphite drawing is chosen by its line and tone: soft and round plays piano or
+Rhodes, crisp and angular plays harp, kalimba or guitar. The page's colour
+reads as two axes, warmth and tint, so blue and violet differ. Two instruments
+play; one can change every 8 s at most, and only when another clearly leads.
+Replayed headless on 2026-10-09: blue washes and blue pencil chose flute, smooth
+yellow sweeps vibraphone, black loops piano, black zigzags harp. Not yet
+listened to.
+
+The lab records and replays drawings (`test/perception/recordings/`) and runs
+an evaluation over drawn scenes (`scenes.ts`, `evaluate.ts`) that differ by
+design in one quality. On 2026-10-09 (app brushes, q4 SigLIP on WebGPU), the
+measurements read 20 of 20 designed pairs the intended way and the probes 25
+of 28, with no unrelated dimension moving more than 0.15, identical readings
+for one picture drawn in three orders, and a region that took in the whole of
+a form a new colour crossed. Only the "soft" probe feeds the music so far: it
+alone added something the measurements can't see (a grainy broad pencil
+against a smooth wash). With the voice playing, an input's change reached the
+audio clock in 10.5 ms (p95 11.6 ms) in headless Chrome on an M-series Mac,
+before the output device's own latency. These scenes are scaffolding; the
+real test is people's drawings, rated before anyone hears the music.
+
 ## The pen's own sound
 
-`src/audio/touch.ts` gives every mark a sound before any model is involved, in
-its own AudioContext so it plays while the bed is paused or still connecting.
+`src/audio/touch.ts` answers the pen before any model is involved. The pen is
+not an instrument and plays no notes. It leads the music, the way a dancer
+leads a partner.
 
 - **Paper.** A quiet, unpitched friction texture under every stroke, felt more
-  than heard. Its grain speeds up with the pen; a thick nib sounds like a marker
-  and the eraser like rubber.
+  than heard, in its own AudioContext so it plays while the music is paused or
+  still connecting. Its grain speeds up with the pen; a thick nib sounds like a
+  marker and the eraser like rubber. A pencil ticks where it lands.
+- **The lead.** Lyria takes seconds to change what it plays, but its audio runs
+  through our own Web Audio chain (`PcmScheduler`) on the way out, and that
+  answers in milliseconds. So the hand shapes the music's own sound as it
+  plays. Drawing at all leans it in by half a dB. Quick strokes open the top
+  end, while slow ones, or a stylus laid over to shade, warm it (a high shelf
+  from +2 to -2.5 dB). Pressing harder swells it by up to a dB more. Small marks
+  draw it close and big sweeps widen it (mid/side, 0.88 to 1.2). Ordinary
+  drawing sits in the flat middle of each curve, so only a clear change in how
+  you move is heard. It glides in within about half a second, and once the
+  hand stops it settles back to the untouched mix over two or three seconds,
+  so it never pumps between strokes. Nothing is random, and it backs off as
+  you settle into a long session. `leadOf` holds every curve.
 - **Clearing the page** is a soft swish.
 
-On the web, notes answer brush strokes on both the landing page and `/app`, in
-soft, spaced phrases in F major / D minor pentatonic. Each brush has its own
-voice, synthesized in the engine, and neither is an instrument the bed plays:
+Both are always on: stop drawing and within a few seconds you hear the music
+untouched. The landing page's wall has no music to lead, so it plays the paper alone.
 
-- **Pencil plucks**: a soft wooden note, gone in about half a second. Sharp
-  corners pluck too, so zigzags play and smooth lines stay quiet, and every
-  touchdown ticks.
-- **Watercolor swells**: a two-note chord with no attack that rises with paint
-  flow (speed and pressure), walks the scale as the brush moves up or down,
-  and fades for a couple of seconds after the brush lifts.
-
-Settings → Brush sounds switches back to the earlier piano
-(`public/sounds/piano-*.mp3`, prefetched at startup) to compare. Rapid hatching
-and erasing stay textural, and long drawing sessions gradually leave more space
-between phrases. Scene-change chimes remain removed; the iPad pen still plays
-paper texture only.
-
-`LEVEL` is the one knob for balancing it against the bed by ear. The iPad
-plays the same pen (`ios/Skuzic/Audio/TouchEngine.swift`, on AVAudioEngine),
-driven by the Pencil's own pressure and every sample it takes.
+`LEVEL` balances the paper against the music by ear. The iPad plays the same
+paper (`ios/Skuzic/Audio/TouchEngine.swift`, on AVAudioEngine), driven by the
+Pencil's own pressure and every sample it takes; it doesn't lead the music yet.
 
 ## Backends
 
@@ -187,8 +270,8 @@ style embeddings and has no concept of tempo, and no key control of its own.
 Rather than let dead knobs sit in the UI, `CAPABILITIES` drives both which
 controls render and what the planner is told it may emit.
 
-Left alone, MRT2 picks any key it likes, which clashes with the pen's F major.
-So the bridge holds it to a four-chord loop in the pen's key through MRT2's
+Left alone, MRT2 picks any key it likes, while Lyria is held to F major.
+So the bridge holds it to a four-chord loop in that key through MRT2's
 notes input, leaves the voicing to the model, and starts the loop on D minor
 for darker moods. In-key energy went from 67% to 94%; see
 [the bridge README](../server/README.md#staying-in-key).
@@ -310,9 +393,11 @@ src/
               mixer.ts:     weight ramping, shared by both
               scheduler.ts: gapless PCM playback
               touch.ts:     the pen's own sound
+  perception/ the rebuild (dev only): gesture, measure, probes, state, mapping,
+              voice and stream engines, scenes and evaluation, the Lab panel
   ui/         landing, canvas and dock, mixer, settings, history
 scripts/      embed-palette.py: palette tags -> SigLIP text vectors
-              make-pen-sounds.py: shared web brush piano samples
+              embed-probes.py: perception probes -> SigLIP text vectors
 server/       Python WebSocket bridge wrapping Magenta RT2
 test/         reducer, schema, touch, eyes and ink tests
 ```
@@ -328,4 +413,3 @@ in the tree are `@google/genai`'s (`echo 'preinstall: no-op'`), protobufjs's and
 onnxruntime-node's (a Node binary transformers.js only uses outside the
 browser), none of which affects a browser bundle. Build output is byte-identical
 with them skipped.
-

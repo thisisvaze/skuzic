@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import NumberFlow from '@number-flow/react';
 import { AnimatePresence } from 'motion/react';
-import { Plus, Volume2, VolumeX, X } from 'lucide-react';
+import { Plus, X } from 'lucide-react';
 
 import { Slider } from '@/components/ui/slider';
 import { cn } from '@/lib/utils';
@@ -82,16 +82,8 @@ export function TrackRack({ tracks, dispatch, maxTracks, readOnly = false }: Pro
               )}
             >
               <div className="flex items-center gap-2">
-                <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-[var(--tint)]" />
-                <span
-                  className="min-w-0 truncate text-[13px] font-medium"
-                  title={track.origin && `from “${track.origin}”`}
-                >
-                  {track.label}
-                </span>
-                <span className="ml-auto shrink-0 text-[11px] text-muted-foreground tabular-nums">
-                  {track.muted ? 'off' : <NumberFlow value={Math.round(track.volume * 100)} />}
-                </span>
+                {/* The dot is the switch: filled while the sound plays, an empty ring when it's
+                    off. The ::before pads its 12px out to a fingertip-sized target. */}
                 <button
                   type="button"
                   disabled={readOnly}
@@ -99,10 +91,17 @@ export function TrackRack({ tracks, dispatch, maxTracks, readOnly = false }: Pro
                   aria-label={track.muted ? `Turn ${track.label} on` : `Turn ${track.label} off`}
                   title={track.muted ? 'Turn on' : 'Turn off'}
                   onClick={() => dispatch({ type: 'SET_MUTED', target: track.id, muted: !track.muted })}
-                  className="grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground outline-none transition-colors hover:bg-secondary hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60 disabled:pointer-events-none"
+                  className={cn(
+                    'relative size-3 shrink-0 rounded-full border-2 border-[var(--tint)] outline-none transition duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] before:absolute before:-inset-2 hover:scale-125 focus-visible:ring-2 focus-visible:ring-ring/60 active:scale-90 disabled:pointer-events-none motion-reduce:transition-none',
+                    !track.muted && 'bg-[var(--tint)]',
+                  )}
+                />
+                <span
+                  className="min-w-0 flex-1 truncate text-[13px] font-medium"
+                  title={track.origin && `from “${track.origin}”`}
                 >
-                  {track.muted ? <VolumeX className="size-4" /> : <Volume2 className="size-4" />}
-                </button>
+                  {track.label}
+                </span>
                 {!readOnly && (
                   <button
                     type="button"
@@ -121,15 +120,20 @@ export function TrackRack({ tracks, dispatch, maxTracks, readOnly = false }: Pro
 
               <Words track={track} readOnly={readOnly} dispatch={dispatch} />
 
-              <Slider
-                className="mt-1.5 h-8"
-                disabled={readOnly}
-                value={[track.volume * 100]}
-                max={100}
-                step={1}
-                aria-label={`${track.label} volume`}
-                onValueChange={([v]) => dispatch({ type: 'SET_VOLUME', target: track.id, volume: v / 100 })}
-              />
+              <div className="mt-1.5 grid grid-cols-[minmax(0,1fr)_2rem] items-center gap-2">
+                <Slider
+                  className="h-8"
+                  disabled={readOnly}
+                  value={[track.volume * 100]}
+                  max={100}
+                  step={1}
+                  aria-label={`${track.label} volume`}
+                  onValueChange={([v]) => dispatch({ type: 'SET_VOLUME', target: track.id, volume: v / 100 })}
+                />
+                <span aria-hidden="true" className="text-right text-[11px] text-muted-foreground tabular-nums">
+                  {track.muted ? 'off' : <NumberFlow value={Math.round(track.volume * 100)} />}
+                </span>
+              </div>
             </div>
           </MixerReveal>
         ))}

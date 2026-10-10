@@ -1,6 +1,6 @@
 import { Scale } from '@google/genai';
 import { checkGeminiKey, toApiConfig } from '../src/audio/lyria';
-import { NOTES, attend, bendAt, bendTo, frictionLevel, mayPlay, nextNote, phrase } from '../src/audio/touch';
+import { attend, frictionLevel, leadOf, slantOf } from '../src/audio/touch';
 import {
   DEFAULT_VIBE,
   chooseInstruments,
@@ -14,13 +14,15 @@ import {
   titleOf,
   vibeById,
 } from '../src/vision/eyes';
-import { inkConfig } from '../src/vision/ink';
-import { keepRefinement } from '../src/llm/planner';
+import { inkConfig, swellAfter, withSwell } from '../src/vision/ink';
+import { describeState, keepRefinement, normalizePlan } from '../src/llm/planner';
+import { musicPrompts } from '../src/core/music-prompts';
 import vectors from '../src/vision/palette-vectors.json';
 import palette from '../src/vision/palette.json';
 import { maxTracksFor, reduce, reduceAll } from '../src/core/reducer';
 import { normalize } from '../src/core/schema';
 import { INITIAL_STATE, type Action, type MixConfig, type SkuzicState } from '../src/core/types';
+import { drawingShortcut } from '../src/ui/drawing-shortcuts';
 
 const MAX_TRACKS = maxTracksFor('lyria');
 
@@ -208,53 +210,23 @@ check(
 
 console.log('touch engine');
 
-// F major / D minor pentatonic is F G A C D: pitch classes 5 7 9 0 2.
-check('every pen note is in F major / D minor pentatonic', NOTES.every((m) => [5, 7, 9, 0, 2].includes(m % 12)), NOTES);
-
-// A fixed sequence, so the melody checks are the same on every run.
-let seed = 7;
-const rand = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
-const line: number[] = [];
-let note: number | null = null;
-for (let i = 0; i < 300; i++) line.push((note = nextNote(note, (i * 7) % NOTES.length, rand)));
-check(
-  'the melody moves by steps of at most two and stays in range',
-  line.every((n, i) => n >= 0 && n < NOTES.length && (i === 0 || Math.abs(n - line[i - 1]) <= 2)),
-);
-note = 1;
-for (let i = 0; i < 12; i++) note = nextNote(note, NOTES.length - 1, rand);
-check('drawing high on the page pulls the melody up', note >= 7, note);
-
-check(
-  'a phrase always comes home to F, A or C',
-  Array.from({ length: 200 }, (_, i) => nextNote(i % NOTES.length, (i * 3) % NOTES.length, rand, true)).every((n) => [5, 9, 0].includes(NOTES[n] % 12)),
-);
-check(
-  'a settled pen plays shorter phrases and breathes longer',
-  phrase(0.45, () => 0.5).notes < phrase(1, () => 0.5).notes && phrase(0.45, () => 0.5).breathMs > phrase(1, () => 0.5).breathMs,
-);
 check('attention settles during long drawing, never below its floor', attend(1, 120_000, true) < 0.6 && attend(1, 1e9, true) >= 0.45 - 1e-9);
 check('attention comes back after a pause', attend(0.45, 30_000, false) > 0.9);
-check('notes keep their distance, more so as attention settles', !mayPlay(1200, 1000, 1) && mayPlay(1400, 1000, 1) && !mayPlay(1400, 1000, 0.45));
 check('a still pen is silent', frictionLevel(0, 1) === 0);
 check('zero pressure never mutes a moving pen', frictionLevel(800, 0) > 0);
 check('friction never exceeds full level', frictionLevel(1e6, 1) <= 1);
 
-/** How many corners the pencil finds along a path of points 2 px or so apart. */
-const corners = (path: [number, number][]) => {
-  let bend = bendAt(...path[0]);
-  let n = 0;
-  for (const [x, y] of path.slice(1)) {
-    const next = bendTo(bend, x, y);
-    if (next) [bend, n] = [next.bend, n + Number(next.corner)];
-  }
-  return n;
-};
-const steps = Array.from({ length: 40 }, (_, i) => i);
-check('a right-angle corner plucks once', corners([...steps.map((i): [number, number] => [2 * i, 2 * i]), ...steps.map((i): [number, number] => [80 + 2 * i, 80 - 2 * i])]) === 1);
-check('a zigzag plucks at every turn', corners(Array.from({ length: 200 }, (_, i): [number, number] => [2 * i, 40 - Math.abs((2 * i) % 80 - 40)])) === 9);
-check('a smooth curve never plucks', corners(Array.from({ length: 360 }, (_, i): [number, number] => [120 * Math.cos(i / 57.3), 120 * Math.sin(i / 57.3)])) === 0);
-check('a shaky straight line never plucks', corners(Array.from({ length: 200 }, (_, i): [number, number] => [2 * i, (i % 3) * 1.5])) === 0);
+const near = (a: number, b: number) => Math.abs(a - b) < 1e-9;
+// pace, pressure, reach, slant, depth; ordinary drawing is mid-pace, a mouse's 0.5, a mid-sized gesture, upright.
+const lead = (pace = 0.42, pressure = 0.5, reach = 0.375, slant = 0, depth = 1) => leadOf(pace, pressure, reach, slant, depth);
+check('ordinary drawing only leans in a touch', near(lead().lift, 0.5) && near(lead().tone, 0.5) && near(lead().width, 1), lead());
+check('quick drawing opens the music up, slow drawing warms it', near(lead(1).tone, 2) && near(lead(0.1).tone, -1.5));
+check('shading with a leaning stylus warms it, never past -2.5 dB', lead(0.42, 0.5, 0.375, 1).tone < 0 && near(lead(0, 0.5, 0.375, 1).tone, -2.5));
+check('pressing harder swells it by at most 1.5 dB, a mouse never does', near(lead(0.42, 1).lift, 1.5) && near(lead(0.42, 0.5).lift, 0.5));
+check('small marks draw it close, big sweeps open it wide', near(lead(0.42, 0.5, 0).width, 0.88) && near(lead(0.42, 0.5, 1).width, 1.2));
+check('a settled session leads more gently', lead(1, 1, 1, 0, 0.7).tone < lead(1, 1, 1).tone && lead(1, 1, 1, 0, 0.7).width < lead(1, 1, 1).width);
+check('no depth leaves the music untouched', near(lead(1, 1, 1, 1, 0).lift, 0) && near(lead(1, 1, 1, 1, 0).tone, 0) && near(lead(1, 1, 1, 1, 0).width, 1));
+check('an upright or writing stylus never shades, one laid over does', slantOf(0, 0) === 0 && slantOf(30, 20) === 0 && slantOf(75, 0) === 1);
 
 console.log('eyes');
 
@@ -345,40 +317,124 @@ const rainy = nextMix(readScene(vectors, rain), null)!;
 const layers = (mix: typeof rainy, backend: 'lyria' | 'magenta') =>
   mixActions(mix, backend, { density: 0.4, brightness: 0.4 }).filter((a) => a.type === 'ADD_TRACK');
 check(
-  'a mix is ground, up to three things and up to two instruments, never below 0.15',
+  'a mix contains only drawing subjects and instruments, never a style channel',
   mixActions(landscape, 'lyria', {})[0].type === 'CLEAR_TRACKS' &&
-    layers(landscape, 'lyria').length <= 6 &&
-    layers(landscape, 'lyria').every((a) => a.type === 'ADD_TRACK' && a.volume >= 0.15),
+    layers(landscape, 'lyria').length <= 5 &&
+    layers(landscape, 'lyria').every((a) => a.type === 'ADD_TRACK' && a.volume >= 0.15 && a.label !== 'Style'),
 );
 check(
-  'each engine gets its measured balance',
-  layers(rainy, 'lyria')[0].type === 'ADD_TRACK' && layers(rainy, 'lyria')[0].prompt === DEFAULT_VIBE.ground.lyria &&
-    layers(rainy, 'magenta')[0].type === 'ADD_TRACK' && layers(rainy, 'magenta')[0].prompt === DEFAULT_VIBE.ground.magenta &&
-    layers(rainy, 'lyria')[1].type === 'ADD_TRACK' && layers(rainy, 'lyria')[1].volume === palette.moodWeight.lyria &&
-    layers(rainy, 'magenta')[1].type === 'ADD_TRACK' && layers(rainy, 'magenta')[1].volume === palette.moodWeight.magenta,
+  'each engine keeps the drawing mood weight',
+  layers(rainy, 'lyria')[0].volume === palette.moodWeight.lyria &&
+    layers(rainy, 'magenta')[0].volume === palette.moodWeight.magenta,
 );
 check(
   'each thing is its own layer, named for it, the biggest loudest',
   layers(landscape, 'lyria')
-    .slice(1, 4)
+    .slice(0, 3)
     .map((a) => (a.type === 'ADD_TRACK' ? `${a.label} ${a.volume}` : ''))
     .join(', ') === 'mountains 0.26, trees 0.15, sunshine 0.15',
   layers(landscape, 'lyria'),
 );
 
+const leadFor = (id: string) => nextMix(readScene(vectors, [figure(id, 400, [[id, 0.95], ['energy', 0.05]])]), null)!.instruments[0].id;
+check(
+  'the things pick the instrument, not the colour: mountains play strings, water harp, clouds pads',
+  leadFor('mountains') === 'strings' && leadFor('water') === 'harp' && leadFor('clouds') === 'pads',
+  [leadFor('mountains'), leadFor('water'), leadFor('clouds')],
+);
+{
+  const leads = new Map<string, number>();
+  for (const m of palette.moods.filter((m) => m.tags.length)) leads.set(leadFor(m.id), (leads.get(leadFor(m.id)) ?? 0) + 1);
+  check('no instrument leads for more than a quarter of the things', Math.max(...leads.values()) <= 25, Object.fromEntries(leads));
+}
+
 const jazz = vibeById('jazz');
 const piano = vibeById('piano');
-check(
-  'a vibe plays in its own style',
-  mixActions(rainy, 'lyria', {}, jazz).some((a) => a.type === 'ADD_TRACK' && a.label === 'Style' && a.prompt === jazz.ground.lyria),
-);
 check(
   "only the vibe's own instruments compete for a seat",
   readScene(vectors, rain, jazz).instruments.every((r) => jazz.instruments.includes(r.item.id)),
 );
 check(
-  'a vibe without instruments plays its style and the page alone',
+  'solo piano carries the page without adding unrelated instruments',
   nextMix(readScene(vectors, rain, piano), null, piano)!.instruments.length === 0,
+);
+
+console.log('vibe as musical context');
+
+const artMix = reduceAll(INITIAL_STATE, mixActions(rainy, 'lyria', {}));
+const originalWords = JSON.stringify(artMix.tracks);
+const jazzPrompts = musicPrompts(artMix, jazz);
+check(
+  'the chosen style accompanies the drawing without adding a prompt or any weight',
+  jazzPrompts.length === artMix.tracks.length &&
+    jazzPrompts.every((prompt, i) => prompt.weight === artMix.tracks[i].volume) &&
+    jazzPrompts[0].text.includes(artMix.tracks[0].prompt) &&
+    jazzPrompts.filter((prompt) => prompt.text.includes(jazz.ground.lyria)).length === 1,
+);
+const pianoPrompts = musicPrompts(artMix, piano);
+check(
+  'changing vibe replaces the genre cue and leaves editable drawing words alone',
+  pianoPrompts[0].text.includes(piano.ground.lyria) &&
+    pianoPrompts.every((prompt) => !prompt.text.includes(jazz.ground.lyria)) &&
+    JSON.stringify(artMix.tracks) === originalWords,
+);
+const mutedArt = reduce(artMix, { type: 'SET_MUTED', target: artMix.tracks[0].id, muted: true });
+const mutedPrompts = musicPrompts(mutedArt, jazz);
+check(
+  'muting the leading subject keeps the style with the next audible sound',
+  mutedPrompts.length === artMix.tracks.length - 1 &&
+    mutedPrompts[0].text.includes(mutedArt.tracks[1].prompt) &&
+    mutedPrompts[0].text.includes(jazz.ground.lyria),
+);
+check(
+  'an empty or fully muted mix stays silent, with no hidden genre backing',
+  musicPrompts(INITIAL_STATE, jazz).length === 0 &&
+    musicPrompts({ ...artMix, tracks: artMix.tracks.map((track) => ({ ...track, muted: true })) }, jazz).length === 0,
+);
+check(
+  'a zero or blank first layer does not swallow the genre cue',
+  musicPrompts(reduce(artMix, { type: 'SET_VOLUME', target: artMix.tracks[0].id, volume: 0 }), jazz)[0].text.includes(jazz.ground.lyria) &&
+    musicPrompts(reduce(artMix, { type: 'MODIFY_TRACK', target: artMix.tracks[0].id, prompt: ' ' }), jazz)[0].text.includes(jazz.ground.lyria),
+);
+check(
+  'both engines and every opening vibe have drawing prompts, never a dedicated style weight',
+  palette.vibes.every((vibe) => (['lyria', 'magenta'] as const).every((backend) => {
+    const opening = reduceAll({ ...INITIAL_STATE, backend }, mixActions(introMix(vibe), backend, {}));
+    const prompts = musicPrompts(opening, vibe);
+    return prompts.length > 0 && prompts.length === opening.tracks.length &&
+      prompts[0].text.includes(vibe.ground[backend]) &&
+      opening.tracks.every((track) => track.label !== 'Style' && track.volume < 1);
+  })),
+);
+const rebuilt = reduceAll(artMix, normalizePlan([
+  { type: 'CLEAR_TRACKS' },
+  { type: 'ADD_TRACK', label: 'Style', prompt: 'techno', volume: 1 },
+  { type: 'ADD_TRACK', label: ' genre ', prompt: 'ambient', volume: 1 },
+  { type: 'ADD_TRACK', label: 'Rain', prompt: 'light brushed ticks', volume: 0.6 },
+], 'Reimagine', 'realvibe'));
+check(
+  'Reimagine cannot reintroduce a standalone style channel, and rebuilding keeps the chosen vibe',
+  rebuilt.tracks.length === 1 && rebuilt.tracks[0].label === 'Rain' &&
+    musicPrompts(rebuilt, jazz)[0].text === `light brushed ticks; ${jazz.ground.lyria}`,
+);
+check(
+  'the planner sees the selected vibe even with an empty mix and for either engine',
+  describeState(INITIAL_STATE, jazz).includes(`Musical idiom: ${jazz.ground.lyria}`) &&
+    describeState({ ...INITIAL_STATE, backend: 'magenta' }, jazz).includes(`Musical idiom: ${jazz.ground.magenta}`) &&
+    describeState(INITIAL_STATE, piano).includes(`Instruments: ${piano.ground.lyria}`),
+);
+const effects = reduceAll(artMix, normalizePlan([
+  { type: 'CLEAR_TRACKS' },
+  { type: 'ADD_TRACK', label: 'Rain', prompt: 'rain tapping on glass', volume: 0.5 },
+], 'Reimagine', 'sounds'));
+check(
+  'a sound-effects A/B candidate keeps literal sounds without imposing a musical vibe',
+  effects.soundEffects && musicPrompts(effects, jazz)[0].text === 'rain tapping on glass' &&
+    !artMix.soundEffects && musicPrompts(artMix, jazz)[0].text.includes(jazz.ground.lyria),
+);
+check(
+  'a fresh drawing interpretation returns from sound effects to the selected musical vibe',
+  !reduceAll(effects, mixActions(rainy, 'lyria', {})).soundEffects,
 );
 check(
   'every vibe names real instruments and a style for each engine',
@@ -425,7 +481,18 @@ check(
 console.log('ink');
 
 const base = { density: 0.4, brightness: 0.5 };
-check('a fuller page plays busier', inkConfig(base, { coverage: 0.25, warmth: 0 }).density > inkConfig(base, { coverage: 0.02, warmth: 0 }).density);
+check('a fuller page plays no busier', inkConfig(base, { coverage: 0.25, warmth: 0 }).density === inkConfig(base, { coverage: 0.02, warmth: 0 }).density);
+{
+  // Ten seconds of drawing, then ten of rest, in one-second ticks.
+  let swell = 0;
+  const wave: number[] = [];
+  for (let t = 0; t < 20; t++) wave.push(withSwell(base, (swell = swellAfter(swell, t < 10, 1000))).density);
+  check(
+    'drawing swells the music and resting lets it settle back, with no ratchet',
+    wave[9] > base.density && wave[19] < wave[9] && wave[19] - (base.density - 0.1) < 0.05,
+    wave,
+  );
+}
 check('warm colours play brighter, cool ones darker', inkConfig(base, { coverage: 0.1, warmth: 1 }).brightness > inkConfig(base, { coverage: 0.1, warmth: -1 }).brightness);
 check('ink never pushes the knobs out of their gentle range', [0, 0.5, 1].every((c) => [-1, 1].every((w) => {
   const k = inkConfig({ density: 0.85, brightness: 0.9 }, { coverage: c, warmth: w });
@@ -443,6 +510,23 @@ check('no Lyria for the key says so', /Lyria/.test((await checkGeminiKey('k', go
 check('no network says so', /reach Google/.test(
   (await checkGeminiKey('k', async () => { throw new TypeError('offline'); })) ?? '',
 ));
+
+console.log('drawing shortcuts');
+const shortcutKey = { key: '', metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, isComposing: false, defaultPrevented: false };
+const shortcut = (key: string, modifiers: Partial<typeof shortcutKey> = {}) => drawingShortcut({ ...shortcutKey, ...modifiers, key });
+check('0 restores full opacity, not invisible ink', JSON.stringify(shortcut('0')) === JSON.stringify({ type: 'opacity', value: 1 }));
+check('number keys set brush opacity', JSON.stringify(shortcut('3')) === JSON.stringify({ type: 'opacity', value: 0.3 }));
+check('brackets resize and shifted brackets adjust opacity',
+  shortcut('[')?.type === 'size' && shortcut(']', { shiftKey: true })?.type === 'opacity-step' &&
+  JSON.stringify(shortcut('{', { shiftKey: true })) === JSON.stringify({ type: 'opacity-step', delta: -0.1 }));
+check('tool selection also works with Caps Lock', JSON.stringify(shortcut('B')) === JSON.stringify({ type: 'tool', tool: 'watercolor' }));
+check('Mac and Windows history chords work', shortcut('z', { metaKey: true })?.type === 'undo' &&
+  shortcut('Z', { metaKey: true, shiftKey: true })?.type === 'redo' && shortcut('y', { ctrlKey: true })?.type === 'redo');
+check('browser copy, print, bookmark and tab commands stay untouched',
+  ['c', 'p', 'b', '[', ']', '1', '0'].every((key) => shortcut(key, { metaKey: true }) === null && shortcut(key, { ctrlKey: true }) === null));
+check('typing composition, Alt shortcuts and handled events are ignored',
+  shortcut('p', { isComposing: true }) === null && shortcut('p', { altKey: true }) === null && shortcut('e', { defaultPrevented: true }) === null);
+check('unassigned shifted chords do not switch tools', shortcut('P', { shiftKey: true }) === null);
 
 console.log(failures ? `\n${failures} failure(s)` : '\nall passed');
 process.exit(failures ? 1 : 0);

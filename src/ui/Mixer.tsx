@@ -2,7 +2,7 @@ import { useId, useRef, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { Scale } from '@google/genai';
 import NumberFlow, { type Format } from '@number-flow/react';
-import { ArrowUp, ChevronDown, Drum, Guitar, Lock, LockOpen, X } from 'lucide-react';
+import { ArrowUp, ChevronDown, Drum, Guitar, Lock, LockOpen, Sparkles, X } from 'lucide-react';
 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Slider } from '@/components/ui/slider';
@@ -56,6 +56,8 @@ interface Props {
   /** Why the last ask got no answer, if it didn't. */
   askError?: string | null;
   onAsk: (text: string) => void;
+  /** The same rewrite with no words: Gemini decides from the drawing alone. */
+  onReimagine: () => void;
   log: LogEntry[];
 }
 
@@ -237,7 +239,7 @@ function Advanced({
         aria-expanded={open}
         aria-controls={id}
         onClick={() => setOpen(!open)}
-        className="flex cursor-pointer items-center gap-1 rounded-lg px-1 py-1 text-[12px] font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
+        className="flex items-center gap-1 rounded-lg px-1 py-1 text-[12px] font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
       >
         Advanced
         <ChevronDown
@@ -337,7 +339,7 @@ function Advanced({
                   step={1}
                   format={{ maximumFractionDigits: 0 }}
                   suffix=" bpm"
-                  hint="Beats per minute. Changing it restarts the music for a moment."
+                  hint="Beats per minute. The music fades into the new tempo."
                   onChange={(bpm) => set({ bpm })}
                 />
               )}
@@ -389,6 +391,7 @@ export function Mixer({
   thinking,
   askError,
   onAsk,
+  onReimagine,
   log,
 }: Props) {
   const [tab, setTab] = useState<'mix' | 'history'>('mix');
@@ -521,13 +524,13 @@ export function Mixer({
             />
             <div
               aria-busy={thinking}
-              className="relative flex h-11 items-center gap-2 rounded-full bg-input pr-1 pl-4 focus-within:ring-2 focus-within:ring-ring/40"
+              className="relative flex h-11 items-center gap-2 rounded-full bg-input pr-1 pl-4 has-[input:focus]:ring-2 has-[input:focus]:ring-ring/40"
             >
               <input
                 value={ask}
                 onChange={(e) => setAsk(e.target.value)}
                 disabled={thinking}
-                placeholder={thinking ? '' : 'Ask for a change: “make it more chill”'}
+                placeholder={thinking ? '' : 'Ask for a change…'}
                 aria-label="Ask for a change"
                 className="min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-muted-foreground disabled:cursor-default"
               />
@@ -542,15 +545,29 @@ export function Mixer({
               >
                 <span className={thinking ? 'shimmer' : undefined}>Rewriting the mix…</span>
               </span>
-              <button
-                type="submit"
-                aria-label="Send to Gemini"
-                title="Gemini rewrites the mix"
-                disabled={thinking || !canAsk || !ask.trim()}
-                className="grid size-9 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground outline-none transition-opacity hover:bg-primary/85 focus-visible:ring-2 focus-visible:ring-ring/60 disabled:opacity-30"
-              >
-                <ArrowUp className="size-4" />
-              </button>
+              {/* One box, two ways in: empty, Gemini decides from the drawing; typed, it follows your words. */}
+              {ask.trim() ? (
+                <button
+                  type="submit"
+                  aria-label="Send to Gemini"
+                  title="Gemini rewrites the mix"
+                  disabled={thinking || !canAsk}
+                  className="grid size-9 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground outline-none transition-opacity hover:bg-primary/85 focus-visible:ring-2 focus-visible:ring-ring/60 disabled:opacity-30"
+                >
+                  <ArrowUp className="size-4" />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  title="Gemini rewrites the music from your drawing"
+                  disabled={thinking || !canAsk}
+                  onClick={onReimagine}
+                  className="flex h-9 shrink-0 items-center gap-1.5 rounded-full bg-primary px-3.5 text-[13px] font-medium text-primary-foreground outline-none transition-opacity hover:bg-primary/85 focus-visible:ring-2 focus-visible:ring-ring/60 disabled:opacity-30 [&_svg]:text-violet-300 dark:[&_svg]:text-brand-3"
+                >
+                  <Sparkles className="size-4" />
+                  Reimagine
+                </button>
+              )}
             </div>
           </form>
         )}

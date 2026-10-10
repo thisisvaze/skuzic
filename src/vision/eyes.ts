@@ -3,19 +3,11 @@ import palette from './palette.json';
 
 /**
  * The eyes: SigLIP 2 reads what is drawn and composes the music from a curated
- * palette, as layered prompts the way Lyria is meant to be steered: a ground
- * (the genre, all session), the things the page shows, each as its own mood
- * layer, and one or two instruments. Each layer is a short phrase with its own
- * weight, so a change moves one layer while the others play straight through.
- *
- * Chosen by a listening test (numbers in docs/how-it-works.md): on both engines,
- * full sentences per track with the genre repeated in each (the old fixed
- * scenes) scored lowest for enjoyment and made every drawing sound alike, and
- * fully generic prompts drifted genre from drawing to drawing (and once
- * collapsed on Magenta). Short layers scored best and most reliably. The
- * engines want different balances: Lyria a "dreamy" ground with a light mood,
- * Magenta a plain ground with a strong mood (palette.json holds both). The
- * ground itself comes from the vibe the artist starts from.
+ * palette: the things the page shows, each as its own mood layer, and one or
+ * two instruments that fit the chosen vibe. Each layer is a short phrase with
+ * its own weight. The vibe shapes the instrument choices here and accompanies
+ * one drawing prompt at the engine boundary (core/music-prompts.ts); it has
+ * no separate channel or weight competing with the art.
  *
  * The page is read figure by figure. Strokes that belong together (the same
  * ink, close by) make a figure, and each figure is read from its own crop:
@@ -103,8 +95,6 @@ export interface Mix {
   instruments: Instrument[];
 }
 
-const MODEL = 'onnx-community/siglip2-base-patch16-224-ONNX';
-
 const instrument = (id: string) => palette.instruments.find((i) => i.id === id)!;
 
 export const VIBES: Vibe[] = palette.vibes;
@@ -164,9 +154,9 @@ const SETTLE = 3;
 const INSTRUMENT_BELIEF = 0.25;
 const INSTRUMENT_MARGIN = 0.12;
 /**
- * The lead and the colour instrument, under a ground at 1.0. Always two once
- * the page is read: a lone lead measured lower on Lyria (enjoyment 7.1 against
- * 7.3), even where SigLIP's runner-up is only a faint guess.
+ * The lead and the quieter colour instrument. A drawing can choose up to two
+ * from the vibe's instrument palette; solo styles may supply their voice in
+ * the genre cue itself.
  */
 const INSTRUMENT_WEIGHTS = [0.6, 0.4];
 /** No layer plays quieter than this; under it a prompt barely registers. */
@@ -174,14 +164,17 @@ const MIN_VOLUME = 0.15;
 
 type Table = Record<string, { vector: number[] }>;
 
+const dot = (a: ArrayLike<number>, b: ArrayLike<number>) => {
+  let sum = 0;
+  for (let i = 0; i < a.length; i++) sum += a[i] * b[i];
+  return sum;
+};
+
 /** Items ranked by SigLIP's softmax over its scaled similarity, best first. */
-function rank<T extends { id: string }>(items: T[], table: Table, scale: number, image: ArrayLike<number>): Ranked<T>[] {
-  const logits = items.map((item) => {
-    const v = table[item.id].vector;
-    let dot = 0;
-    for (let i = 0; i < v.length; i++) dot += v[i] * image[i];
-    return scale * dot;
-  });
+const rank = <T extends { id: string }>(items: T[], table: Table, scale: number, image: ArrayLike<number>): Ranked<T>[] =>
+  softmax(items, items.map((item) => scale * dot(table[item.id].vector, image)));
+
+function softmax<T>(items: T[], logits: number[]): Ranked<T>[] {
   const top = Math.max(...logits);
   const weights = logits.map((l) => Math.exp(l - top));
   const sum = weights.reduce((a, b) => a + b, 0);
@@ -276,15 +269,43 @@ export function sceneOf(seen: Seen[]): Ranked<Mood>[] {
 const settled = (s: Seen, drawing: boolean) =>
   !drawing || s.figure.strokes >= SETTLE || (s.moods[0].p >= MIN_BELIEF && !MARKS.has(s.moods[0].item.id));
 
-/** The whole page as one embedding, its figures' own weighted the same way. */
-function gistOf(seen: Seen[]): Float32Array {
-  const gist = new Float32Array(seen[0]?.image.length ?? 0);
-  for (const s of seen) {
-    const size = sizeOf(s.figure);
-    for (let i = 0; i < gist.length; i++) gist[i] += size * s.image[i];
+/** Turns a thing's pull toward an instrument into belief: one clear thing gives its instrument most of it. */
+const THING_SCALE = 20;
+const affinities = new WeakMap<Vectors, Map<string, number>>();
+
+/**
+ * How much each thing calls for each instrument: the cosine of their text
+ * vectors, less that instrument's mean over every thing, so one whose tags
+ * sound like everything (kalimba's small animals) doesn't win everywhere.
+ * Keyed `${mood} ${instrument}`. Mountains call for strings, water for harp,
+ * clouds for pads, a house for Rhodes.
+ */
+function affinityOf(vectors: Vectors): Map<string, number> {
+  let table = affinities.get(vectors);
+  if (table) return table;
+  table = new Map();
+  for (const inst of palette.instruments) {
+    const v = vectors.instruments[inst.id].vector;
+    const raw = MOODS.map((m) => dot(vectors.moods[m.id].vector, v));
+    const mean = raw.reduce((a, b) => a + b, 0) / raw.length;
+    MOODS.forEach((m, k) => table!.set(`${m.id} ${inst.id}`, raw[k] - mean));
   }
-  const norm = Math.hypot(...gist) || 1;
-  return gist.map((x) => x / norm);
+  affinities.set(vectors, table);
+  return table;
+}
+
+/**
+ * The instruments the page's things ask for, each thing pulling by its share.
+ * Read from the things, not the page's look: the look is mostly its colour, so
+ * blue mountains used to play harp because blue reads as water.
+ */
+function instrumentsFor(vectors: Vectors, scene: Ranked<Mood>[], vibe: Vibe): Ranked<Instrument>[] {
+  const table = affinityOf(vectors);
+  const offered = palette.instruments.filter((i) => vibe.instruments.includes(i.id));
+  return softmax(
+    offered,
+    offered.map((i) => THING_SCALE * scene.reduce((sum, r) => sum + r.p * table.get(`${r.item.id} ${i.id}`)!, 0)),
+  );
 }
 
 /**
@@ -294,16 +315,10 @@ function gistOf(seen: Seen[]): Float32Array {
  */
 export function readScene(vectors: Vectors, seen: Seen[], vibe: Vibe = DEFAULT_VIBE): Reading {
   const counted = seen.filter((s, k) => settled(s, k === seen.length - 1));
+  const moods = sceneOf(counted);
   return {
-    moods: sceneOf(counted),
-    instruments: counted.length
-      ? rank(
-          palette.instruments.filter((i) => vibe.instruments.includes(i.id)),
-          vectors.instruments,
-          vectors.scale,
-          gistOf(counted),
-        )
-      : [],
+    moods,
+    instruments: counted.length ? instrumentsFor(vectors, moods, vibe) : [],
     sure: counted.some((s) => s.moods[0].p >= MIN_BELIEF),
   };
 }
@@ -400,22 +415,21 @@ export const eyesOwn = (tracks: { origin: string }[], mix: Mix) =>
  * things share the mood's measured weight between them, so a busy page keeps
  * the balance the listening test chose. `words` are Gemini's rewrites by layer
  * label, so a thing or instrument Gemini has described keeps its words when the
- * eyes add or drop another. Layers whose prompt doesn't change (the ground, a
- * kept thing or instrument) play straight through, since the mixer keys on
+ * eyes add or drop another. Layers whose prompt doesn't change (a kept thing
+ * or instrument) play straight through, since the mixer keys on
  * prompt text.
  */
 export function mixActions(
   mix: Mix,
   backend: Backend,
   config: Partial<MixConfig>,
-  vibe: Vibe = DEFAULT_VIBE,
   words: ReadonlyMap<string, string> = new Map(),
 ): Action[] {
   const origin = originOf(mix);
   const round2 = (v: number) => Math.round(v * 100) / 100;
   return [
     { type: 'CLEAR_TRACKS' },
-    { type: 'ADD_TRACK', label: 'Style', prompt: vibe.ground[backend], volume: 1, origin },
+    { type: 'SET_SOUND_EFFECTS', enabled: false },
     ...mix.moods.map(
       (r): Action => ({
         type: 'ADD_TRACK',
@@ -440,64 +454,53 @@ export function mixActions(
 
 export interface Eyes {
   device: 'webgpu' | 'wasm';
-  /** An image URL (a canvas data URL works) to a unit-length SigLIP embedding. */
-  read: (url: string) => Promise<Float32Array>;
+  /** An image URL (a canvas data URL works) or RGBA pixels to a unit-length SigLIP embedding. */
+  read: (image: string | ImageData) => Promise<Float32Array>;
   vectors: Vectors;
 }
 
 let eyes: Promise<Eyes> | null = null;
 
 /**
- * Loads SigLIP 2's image half once (63 MB, then cached by the browser) and the
- * palette's vectors (170 KB zipped). Both are imported on demand so the app's
- * own bundle doesn't carry them.
- *
- * Every half-precision export (fp16, q4f16) drifts far from the reference on
- * this model: cosine about 0.6 against PyTorch. q4 keeps full-precision maths
- * and scores 0.97, and int8 only 0.87. Measured at 21 ms a read on WebGPU and
- * 0.7 s on WASM.
+ * Starts SigLIP 2's image half in a worker of its own (eyes.worker.ts; 63 MB,
+ * then cached by the browser), so neither loading it nor a read ever holds up
+ * the page, and loads the palette's vectors (170 KB zipped). Both come on
+ * demand so the app's own bundle doesn't carry them.
  */
 export function loadEyes(): Promise<Eyes> {
-  eyes ??= (async (): Promise<Eyes> => {
-    const [{ AutoImageProcessor, RawImage, SiglipVisionModel }, { default: vectors }] = await Promise.all([
-      import('@huggingface/transformers'),
-      import('./palette-vectors.json'),
-    ]);
-    const load = async (device: Eyes['device']) => ({
-      device,
-      model: await SiglipVisionModel.from_pretrained(MODEL, { device, dtype: 'q4' }),
-    });
-    // A browser can expose WebGPU and still refuse an adapter (WebGPU off, or
-    // after its GPU process crashed), and a failed WebGPU session leaves the
-    // runtime unable to start a WASM one in the same page. So WebGPU is tried
-    // only once the browser has actually handed over an adapter.
-    const gpu = (navigator as Navigator & { gpu?: { requestAdapter(): Promise<unknown> } }).gpu;
-    const adapter = await gpu?.requestAdapter().catch(() => null);
-    const [processor, { device, model }] = await Promise.all([
-      AutoImageProcessor.from_pretrained(MODEL),
-      adapter ? load('webgpu').catch(() => load('wasm')) : load('wasm'),
-    ]);
-    return {
-      device,
-      vectors,
-      read: async (url) => {
-        try {
-          const { pooler_output } = await model(await processor(await RawImage.read(url)));
-          const v = pooler_output.data as Float32Array;
-          const norm = Math.hypot(...v) || 1;
-          return v.map((x) => x / norm);
-        } catch (error) {
-          // A lost GPU device fails every read after it; load afresh on the
-          // next pen-up instead of failing for the rest of the session.
-          eyes = null;
-          throw error;
-        }
-      },
+  if (eyes) return eyes;
+  const worker = new Worker(new URL('./eyes.worker.ts', import.meta.url), { type: 'module' });
+  const reads = new Map<number, { resolve: (v: Float32Array) => void; reject: (e: Error) => void }>();
+  let next = 0;
+  const vectors = import('./palette-vectors.json');
+  const loading = new Promise<Eyes>((resolve, reject) => {
+    // A failed load (offline, blocked) or read (a lost GPU device fails every
+    // read after it) retires the worker; the next pen-up starts a fresh one.
+    const fail = (error: Error) => {
+      worker.terminate();
+      if (eyes === loading) eyes = null;
+      reject(error);
+      reads.forEach((r) => r.reject(error));
+      reads.clear();
     };
-  })();
-  // A failed load (offline, blocked) gets another try on the next pen-up.
-  eyes.catch(() => {
-    eyes = null;
+    const read = (image: string | ImageData) =>
+      new Promise<Float32Array>((resolve, reject) => {
+        const id = next++;
+        reads.set(id, { resolve, reject });
+        worker.postMessage({ id, image });
+      });
+    worker.onerror = (e) => fail(new Error(e.message || "The drawing reader didn't start"));
+    worker.onmessage = ({ data }: MessageEvent<{ id?: number; device?: Eyes['device']; vector?: Float32Array; error?: string }>) => {
+      if (data.error) return fail(new Error(data.error));
+      if (data.device) {
+        const device = data.device;
+        vectors.then(({ default: vectors }) => resolve({ device, vectors, read }), fail);
+        return;
+      }
+      reads.get(data.id!)?.resolve(data.vector!);
+      reads.delete(data.id!);
+    };
   });
-  return eyes;
+  eyes = loading;
+  return loading;
 }

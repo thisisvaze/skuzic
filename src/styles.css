@@ -108,6 +108,10 @@
   body {
     @apply bg-background text-foreground antialiased;
   }
+  /* Tailwind 4 leaves buttons on the arrow; here anything clickable shows the hand. */
+  button:not(:disabled) {
+    cursor: pointer;
+  }
 }
 
 @utility scrollbar-thin {

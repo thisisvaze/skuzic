@@ -118,6 +118,9 @@ export function reduce(state: SkuzicState, action: Action): SkuzicState {
     case 'SET_CONFIG_LOCK':
       return { ...state, configLocks: { ...state.configLocks, [action.field]: action.locked } };
 
+    case 'SET_SOUND_EFFECTS':
+      return { ...state, soundEffects: action.enabled };
+
     case 'SET_BACKEND': {
       if (action.backend === state.backend) return state;
       // Backends cap prompts differently; keep the loudest that still fit.

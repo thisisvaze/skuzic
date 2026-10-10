@@ -1,8 +1,10 @@
 import { GoogleGenAI, MediaResolution, ThinkingLevel, Type, type Schema } from '@google/genai';
-import { geminiAuth } from '../lib/relay';
+import { geminiAuth, relayPass } from '../lib/relay';
 import { CAPABILITIES } from '../audio/engine';
 import { PLAN_SCHEMA, normalize } from '../core/schema';
 import type { Action, MixConfig, SkuzicState, Track } from '../core/types';
+import { DEFAULT_VIBE, type Vibe } from '../vision/eyes';
+import palette from '../vision/palette.json';
 import {
   DEFAULT_PLANNER_CONFIG,
   PLANNER_CONFIGS,
@@ -15,8 +17,11 @@ import {
  * lite one to fall back to when latency matters more than the arrangement.
  */
 export const PLANNER_MODELS = [
-  { id: 'gemini-3.8-flash', label: 'Smarter', detail: 'Gemini 3.8 Flash' },
-  { id: 'gemini-3.5-flash-lite', label: 'Faster', detail: 'Gemini 3.5 Flash Lite' },
+  // The least thinking each model takes, since latency matters more than depth
+  // here. 3.8 Flash refuses MINIMAL (HTTP 400, 2026-10-08), so LOW is its floor.
+  { id: 'gemini-3.8-flash', label: 'Smarter', detail: 'Gemini 3.8 Flash', thinking: ThinkingLevel.LOW },
+  // On 2026-10-07 Flash Lite took 8-20 s at LOW, past the timeout, and 0.5-1 s at MINIMAL.
+  { id: 'gemini-3.5-flash-lite', label: 'Faster', detail: 'Gemini 3.5 Flash Lite', thinking: ThinkingLevel.MINIMAL },
 ] as const;
 
 export type PlannerModel = (typeof PLANNER_MODELS)[number]['id'];
@@ -43,12 +48,10 @@ WHAT THE MUSIC IS FOR
 Someone is drawing, and this is playing while they do it. The music's job is to
 make them want to make the next mark — not to report on the last one.
 
-So the first test of a reply is not "is this an accurate reading of the
-drawing". It is "would a person choose to have this playing for twenty minutes
-while they work". A mix that maps the canvas perfectly and is no pleasure to
-listen to has failed at the only thing that matters. When accuracy and beauty
-pull against each other, beauty wins: play something lovely that is *near* the
-drawing rather than something exact that nobody would sit with.
+Make the drawing audible through the chosen vibe. Different subjects, colours
+and marks should produce different moods and performances within that style.
+Keep it comfortable to listen to for twenty minutes, but never replace the
+art's character with a generic pleasant backing.
 
 Music inspires by leaving room. A filled, finished arrangement is a closed door
 — there is nothing left to add, so there is nothing for the artist to answer.
@@ -69,33 +72,38 @@ The idiom is chosen once and then kept. What moves is everything else:
   moving    which instruments play, how hard, how bright, how busy, who carries
             the line, how much space there is
 
-If the CURRENT MIX has tracks, the idiom is already decided — read it off their
-prompts and stay inside it. Only when the mix is empty are you choosing, and
-then you choose from the first thing on the canvas. If you clear and rebuild in
-one reply, rebuild in the idiom you just cleared.
+SELECTED VIBE below supplies the idiom, even when the mix is empty or rebuilt.
+The artist chooses it; a new drawing or a Reimagine does not choose another.
+Interpret the art through that idiom. The drawing determines mood, instruments,
+register, rhythm, touch and movement; the vibe determines how those choices
+are performed. A moon in lo-fi might be sleepy muffled keys; rain, light brushed
+percussion; a city, a busier syncopated figure. These must sound like different
+drawings within the same style, not the same stock backing with extra labels.
 
-One layer names the idiom: the style, at weight 1.0, kept all session. Every
-other layer lives inside it and does not repeat the genre; repeating it in
-every prompt was measured to make every drawing sound alike. Mixing idioms is
-still the fastest way to make this sound wrong: the model blends everything you
-send it, so a folk guitar and a techno kick do not arrive as a folk guitar and
-a techno kick. They arrive as neither.
+Never create a Style, Genre or Vibe track, or a generic genre backing track.
+The audio layer supplies the selected genre cue once, within an existing
+drawing prompt, without adding weight. Write only the drawing's musical details
+in track prompts; do not repeat genre names. Pick instruments that belong in
+the selected vibe, including its solo or ensemble constraints. Literal Sound
+effects is the one explicit exception: that strategy bypasses musical style.
 
 HOW MUCH TO PLAY
 More prompts is not a bigger arrangement. The model always plays a full band;
 prompts only tell it what kind of band, and past four the style smears rather
 than grows.
 
-  nothing yet, or one small mark      style, mood and one instrument
-  a recognisable subject              style, mood, a lead and a second
-                                      instrument: four, the ceiling
+  nothing yet, or one small mark      mood and one instrument
+  a recognisable subject              mood, a lead and a second instrument
 
-Three is the floor. A style and a mood with nothing to play them is a sound
-rather than music, and it would arrive exactly when the artist is most
-tentative and most needs meeting.
+Keep two or three layers; the on-device reader may already have separate mood
+layers for distinct drawn subjects. Preserve those when useful. Solo piano
+can use a single expressive piano layer. No extra layer is needed for style.
 
-To make the music grow as the page fills, do not add layers. Raise density,
-open brightness, and let the lead's words describe a fuller performance:
+The music follows the hand, not how full the page is: more drawing on the
+page is never by itself a reason to play busier, and a full page of calm lines
+stays calm. When the drawing does call for more energy, do not add layers.
+Raise density, open brightness, and let the lead's words describe a fuller
+performance:
 "strings swelling", "double-time brushes", "bass walking in octaves". That is
 what a build sounds like. Layers competing is what mush sounds like.
 
@@ -103,14 +111,12 @@ WRITING THE LAYERS
 Each layer is a short text prompt with its own weight, the way these music
 models are meant to be steered. The words are yours; the shape is not:
 
-  style    the genre, once                  "dreamy lo-fi hip hop"      1.0
   mood     two words for the feeling        "gentle and bittersweet"    0.45
   lead     an instrument and how it plays   "soft felt piano melody"    0.6
   second   another, under the lead          "twinkling glockenspiel"    0.4
 
-On BACKEND magenta, keep the style to the bare genre ("lo-fi hip hop") and give
-the mood more weight, 0.8. That balance measured best there; the lighter mood
-and the "dreamy" style measured best on lyria.
+On BACKEND magenta, give the mood more weight, 0.8. The selected genre is
+handled separately from these editable words on both backends.
 
   bad:  "a house", "happy music", "something cozy"
   bad:  "lo-fi hip hop Rhodes chords, soft swung eighths, tape warble"
@@ -150,22 +156,19 @@ prompt.`;
 const MECHANICAL_RULES = `ONE ROLE PER LAYER
 Every live layer holds a different role:
 
-  STYLE   the genre; it brings the band's own bass and drums    exactly one
-  MOOD    how it feels                                          exactly one
+  MOOD    how a drawn subject feels                      one per main subject
   VOICE   the lead instrument, carrying the line                exactly one
   BODY    a second instrument: a bed, a texture or a pulse     at most one
 
-STYLE is the floor. It is what makes everything above it read as music rather
-than as effects, and it is the layer that should survive the drawing changing
-completely.
+The selected vibe is context shared by these roles, never another layer.
 
 Two layers in one role is the most common way this instrument turns to mush.
 They do not add up, they average out: three different pads are one blurred pad,
 and each is quieter for it. Before ADD_TRACK, name the role it takes. If a live
 layer already holds that role, MODIFY_TRACK that one instead of adding beside it.
 
-Four is the ceiling. A third instrument does not add a part; it blurs the two
-already playing.
+Two instruments are enough. Keep distinct subjects the reader found when they
+matter to the drawing, but do not add a generic backing to fill space.
 
 Rules:
 - Reference existing tracks by their exact id from the CURRENT MIX.
@@ -183,7 +186,8 @@ Rules:
   reaches the engine, so a track quiet enough to seem tasteful is really no
   track at all — and a mix of only those plays silence.
 - CLEAR_TRACKS only for events explicitly about erasure or starting over, never
-  for a mood shift, and re-establish the style in the same reply.
+  for a mood shift. The selected vibe survives clearing; do not recreate it as
+  a track.
 - Never end a reply with zero live tracks. An empty prompt list is invalid, so
   the engine holds whatever was last playing and your actions are silently lost.
   A nearly empty canvas gets two quiet tracks, not none.
@@ -219,15 +223,18 @@ things on the page ("water", "mountains"), gives each a stock mood written
 before anyone drew anything ("flowing and serene"), and picks instruments. It
 cannot see colour, line, style or story: violet water and blue water get the
 same words. You can see the drawing. Make the music belong to this drawing in
-particular by rewriting the words of every layer except Style.
+particular by rewriting the words of every layer within the SELECTED VIBE.
 
   a thing        its label is what was drawn. Write its mood as this drawing
                  shows it: what its colours, line and company make you feel.
   an instrument  its label is the instrument. Keep the instrument and say how
                  it plays here: register, figure, touch.
 
-Two to six words a layer, the feeling first, and no genre words: the Style layer
-holds the genre, and repeating it makes every drawing sound alike. Keep it
+Two to six words a layer, the feeling first. Use the selected vibe to choose
+touch, rhythm and phrasing: lo-fi rain may suggest soft brushed ticks, while
+solo-piano rain may suggest falling notes. Keep each instrument; make its
+performance fit the drawing and the vibe. No genre words: the audio layer
+adds that context once, without a separate Style track. Keep it
 lovely: never atonal, dissonant, harsh or noisy; a dark or violent page gets
 weight, drive and space instead. Translate the feeling of a thing, not its name.
 Words from an earlier pass, anything more specific than a stock phrase, stay
@@ -240,8 +247,10 @@ unless the drawing has changed past them.
   rain in dense black scribbles    rain: "heavy, restless and dark"
                                    harp: "harp, quick falling runs"
 
-Set density from how much is drawn and how busy the line is, and brightness
-from how warm and light the colours are. In reasoning, one sentence of about 20
+Set density from how busy and energetic the line is, never from how much of
+the page is filled, and brightness from how warm and light the colours are.
+The app adds the hand's movement on top, so keep density where this page's
+character sits at rest. In reasoning, one sentence of about 20
 words on what this drawing has that the stock words missed.`;
 
 const REFINE_SCHEMA: Schema = {
@@ -250,7 +259,7 @@ const REFINE_SCHEMA: Schema = {
     reasoning: { type: Type.STRING, description: 'What this drawing has that the stock words missed.' },
     layers: {
       type: Type.ARRAY,
-      description: 'Every layer except Style, with its words for this drawing.',
+      description: 'Every drawing or instrument layer, with its words for this drawing within the selected vibe.',
       items: {
         type: Type.OBJECT,
         properties: {
@@ -267,12 +276,12 @@ const REFINE_SCHEMA: Schema = {
 };
 
 /** The event the follow-up pass sends with the drawing. */
-export const REFINE_EVENT = 'Rewrite every layer except Style for this drawing.';
+export const REFINE_EVENT = 'Rewrite every layer for this drawing within the selected vibe.';
 
 type Knobs = Pick<MixConfig, 'density' | 'brightness'>;
 
 /**
- * What a refine pass may change: a layer's words, never the Style layer's, and
+ * What a refine pass may change: a drawing or instrument layer's words, and
  * the two live knobs, kept in their gentle range. Anything else is dropped, so
  * Gemini can't restructure the eyes' mix. A target matches by id, or by label
  * when the eyes rebuilt the tracks while Gemini was thinking.
@@ -355,7 +364,7 @@ function describeCapabilities(state: SkuzicState): string {
   );
 }
 
-function describeState(state: SkuzicState): string {
+export function describeState(state: SkuzicState, vibe: Vibe = DEFAULT_VIBE): string {
   // `from` is the event that created the track. Without it the planner cannot
   // tell which tracks belong to a scene the user has already moved on from,
   // so it only ever layers new material on top of the old mood.
@@ -372,8 +381,14 @@ function describeState(state: SkuzicState): string {
 
   const c = state.config;
   return `${describeCapabilities(state)}
+SELECTED VIBE: ${vibe.name}
+Musical idiom: ${vibe.ground[state.backend]}
+Instruments: ${vibe.instruments.length
+    ? palette.instruments.filter((instrument) => vibe.instruments.includes(instrument.id)).map((instrument) => instrument.label).join(', ')
+    : vibe.ground[state.backend]}
+The drawing supplies the feeling and performance inside this idiom. No separate style channel.
 CURRENT MIX
-tracks: ${state.tracks.length} live (style, a mood for each thing drawn, and one or two instruments)
+tracks: ${state.tracks.length} (drawing moods and instruments)
 ${tracks}
 config: bpm=${c.bpm} density=${c.density.toFixed(2)} brightness=${c.brightness.toFixed(
     2,
@@ -389,6 +404,19 @@ Never change a locked control, even when the event asks for it. The user must un
 const PLAN_TIMEOUT_MS = 10_000;
 
 type Part = { text: string } | { inlineData: { mimeType: string; data: string } };
+
+/** Keep style out of the channel model even if a planner invents the old role. */
+export function normalizePlan(
+  raw: Parameters<typeof normalize>[0],
+  event: string,
+  configId: PlannerConfigId = DEFAULT_PLANNER_CONFIG,
+): Action[] {
+  const actions = normalize(raw, event).filter((action) =>
+    !((action.type === 'ADD_TRACK' || action.type === 'MODIFY_TRACK') &&
+      action.label && /^(style|genre|vibe)$/i.test(action.label.trim())),
+  );
+  return [{ type: 'SET_SOUND_EFFECTS', enabled: configId === 'sounds' }, ...actions];
+}
 
 /** The drawing, if there is one, then the text: the order the model reads them in. */
 function partsFor(imageDataUrl: string | undefined, text: string): { parts: Part[]; imageBytes: number } {
@@ -420,6 +448,7 @@ export function createPlanner(apiKey: string, model: PlannerModel = DEFAULT_PLAN
 
   /** One round trip to one model, with the timeout and the error naming both passes need. */
   async function once(which: PlannerModel, systemInstruction: string, parts: Part[], responseSchema: Schema) {
+    if (!apiKey) await relayPass();
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), PLAN_TIMEOUT_MS);
     const startedAt = performance.now();
@@ -431,9 +460,7 @@ export function createPlanner(apiKey: string, model: PlannerModel = DEFAULT_PLAN
           systemInstruction,
           responseMimeType: 'application/json',
           responseSchema,
-          // Latency matters more than depth here. On 2026-10-07 Flash Lite took
-          // 8-20 s at LOW, past the timeout, and 0.5-1 s at MINIMAL.
-          thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
+          thinkingConfig: { thinkingLevel: PLANNER_MODELS.find((m) => m.id === which)!.thinking },
           // A rough sketch only has to read as a *shape*; 64 image tokens is
           // plenty for that and cuts the prefill against MEDIUM's 256.
           mediaResolution: MediaResolution.MEDIA_RESOLUTION_LOW,
@@ -525,24 +552,25 @@ export function createPlanner(apiKey: string, model: PlannerModel = DEFAULT_PLAN
     // Per call rather than baked into the factory, so switching strategy takes
     // effect on the next tap instead of the next session.
     configId: PlannerConfigId = DEFAULT_PLANNER_CONFIG,
+    vibe: Vibe = DEFAULT_VIBE,
   ): Promise<Plan> {
-    const { parts, imageBytes } = partsFor(imageDataUrl, `${describeState(state)}\n\nEVENT\n${event}`);
+    const { parts, imageBytes } = partsFor(imageDataUrl, `${describeState(state, vibe)}\n\nEVENT\n${event}`);
     const { parsed, request, model: answered, ...usage } = await ask(systemInstruction(configId), parts, PLAN_SCHEMA);
     return {
       reasoning: (parsed.reasoning as string) ?? '',
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      actions: normalize(((parsed.actions as unknown[]) ?? []) as any[], event),
+      actions: normalizePlan(((parsed.actions as unknown[]) ?? []) as any[], event, configId),
       timings: { request, imageBytes, ...usage },
       model: answered,
     };
   }
 
   /**
-   * The follow-up pass: every layer but Style rewritten for the drawing, and
+   * The follow-up pass: every layer rewritten for the drawing in its vibe, and
    * the two live knobs, as actions for keepRefinement to vet.
    */
-  async function refine(state: SkuzicState, imageDataUrl: string): Promise<Plan> {
-    const { parts, imageBytes } = partsFor(imageDataUrl, `${describeState(state)}\n\nEVENT\n${REFINE_EVENT}`);
+  async function refine(state: SkuzicState, imageDataUrl: string, vibe: Vibe = DEFAULT_VIBE): Promise<Plan> {
+    const { parts, imageBytes } = partsFor(imageDataUrl, `${describeState(state, vibe)}\n\nEVENT\n${REFINE_EVENT}`);
     const { parsed, request, model: answered, ...usage } = await ask(REFINE_INSTRUCTION, parts, REFINE_SCHEMA);
     const layers = (parsed.layers as { id?: string; words?: string }[] | undefined) ?? [];
     const { density, brightness } = parsed as { density?: number; brightness?: number };

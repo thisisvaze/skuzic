@@ -37,6 +37,8 @@ export type ConfigLocks = Partial<Record<keyof MixConfig, boolean>>;
 export interface SkuzicState {
   backend: Backend;
   tracks: Track[];
+  /** Literal soundscapes bypass musical style context, including during A/B auditions. */
+  soundEffects: boolean;
   config: MixConfig;
   configLocks: ConfigLocks;
   /** Bumped when the model should hard-restart generation. */
@@ -53,6 +55,7 @@ export type Action =
   | { type: 'SET_CONFIG'; config: Partial<MixConfig>; source?: 'user' }
   | { type: 'SET_CONFIG_LOCK'; field: keyof MixConfig; locked: boolean }
   | { type: 'SET_BACKEND'; backend: Backend }
+  | { type: 'SET_SOUND_EFFECTS'; enabled: boolean }
   | { type: 'CLEAR_TRACKS' }
   | { type: 'RESET_CONTEXT' };
 
@@ -109,6 +112,7 @@ export const INITIAL_CONFIG: MixConfig = {
 export const INITIAL_STATE: SkuzicState = {
   backend: 'lyria',
   tracks: [],
+  soundEffects: false,
   config: INITIAL_CONFIG,
   configLocks: {},
   contextEpoch: 0,

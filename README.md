@@ -34,8 +34,8 @@ band winds down to silence.
 
 Want to steer it yourself? Open the **Mixer**. Every sound is a fader you can
 turn up, switch off or rewrite in plain words, and knobs like Energy and
-Brightness do what they say. Or tap **Reimagine** and Gemini rewrites the whole
-arrangement from your drawing.
+Brightness do what they say. At the bottom, tap **Reimagine** and Gemini rewrites
+the whole arrangement from your drawing, or type what you'd like changed instead.
 
 Works in the browser and on iPad/iPhone, pen sound and all. On a Mac you can
 also make the music offline with Google's open Magenta RT2 model, but only
@@ -125,6 +125,12 @@ cost: add a rate limit on `/api/gemini` in Vercel's Firewall and a budget on
 the key's Google Cloud project. Each listener streams about 18 MB a minute
 through the function, and Vercel Hobby ends each connection after 5 minutes
 (skuzic reconnects, with a short dip).
+
+To keep bots off the shared key, add Cloudflare Turnstile: make a widget for
+your domain in Cloudflare's dashboard (Invisible or Managed), set its keys as
+`TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY`, and redeploy. The page clears
+the check in the background and gets an hour's pass, and the function turns
+away anything without one. Visitors who connect their own key never meet it.
 
 ## Good to know
 

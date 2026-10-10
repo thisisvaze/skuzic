@@ -1,0 +1,57 @@
+{
+  "probes": [
+    {
+      "id": "light",
+      "kind": "observed",
+      "measure": "lightness",
+      "pos": ["a pale drawing made of faint, light marks", "light pastel strokes on white paper", "a faint, washed-out sketch", "soft light grey pencil marks"],
+      "neg": ["a dark drawing made of black, inky marks", "dark charcoal strokes on paper", "a bold sketch in black ink", "heavy black marker lines"]
+    },
+    {
+      "id": "dense",
+      "kind": "observed",
+      "measure": "density",
+      "pos": ["a dense drawing that fills the whole page", "a page crowded with marks", "a busy, packed composition", "paper covered in strokes"],
+      "neg": ["a sparse drawing with a few marks on empty paper", "a minimal sketch with lots of blank space", "a few lines on an empty white page", "mostly empty paper with one small mark"]
+    },
+    {
+      "id": "soft",
+      "kind": "observed",
+      "measure": "softness",
+      "pos": ["soft, blurry watercolor washes", "a drawing with soft, blended edges", "diffuse, smudged brush strokes", "a hazy watercolor painting"],
+      "neg": ["crisp, sharp pencil lines", "a drawing with hard, clean edges", "precise, sharply defined ink lines", "a crisp technical line drawing"]
+    },
+    {
+      "id": "curved",
+      "kind": "observed",
+      "measure": "angularity",
+      "invert": true,
+      "pos": ["round, curving lines and circles", "a drawing of soft curves and loops", "rounded, organic shapes", "swirling circular strokes"],
+      "neg": ["angular, jagged lines with sharp corners", "a drawing of zigzags and triangles", "straight lines meeting at sharp angles", "spiky, pointed geometric shapes"]
+    },
+    {
+      "id": "flowing",
+      "kind": "interpreted",
+      "pos": ["a flowing, fluid abstract drawing", "graceful sweeping lines", "lines that flow like water", "an elegant drawing full of movement"],
+      "neg": ["a stiff, static abstract drawing", "rigid, broken lines", "stiff, mechanical marks", "awkward, halting strokes"]
+    },
+    {
+      "id": "delicate",
+      "kind": "interpreted",
+      "pos": ["a delicate, gentle abstract drawing", "fine, delicate lines", "a light and delicate sketch", "thin, careful, tender strokes"],
+      "neg": ["a bold, forceful abstract drawing", "thick, heavy-handed marks", "a rough, aggressive sketch", "blunt, chunky strokes"]
+    },
+    {
+      "id": "heavy",
+      "kind": "interpreted",
+      "pos": ["a heavy, weighty abstract drawing", "thick, dark masses", "a solid, heavy composition", "dense black shapes with a lot of weight"],
+      "neg": ["a weightless, airy abstract drawing", "light, floating marks", "an airy composition with lots of space", "thin marks that seem to float"]
+    },
+    {
+      "id": "restless",
+      "kind": "interpreted",
+      "pos": ["a restless, agitated abstract drawing", "chaotic, frantic scribbles", "nervous, energetic marks", "a tangle of frenzied lines"],
+      "neg": ["a calm, still abstract drawing", "quiet, peaceful marks", "a serene, tranquil sketch", "slow, steady, calm lines"]
+    }
+  ]
+}

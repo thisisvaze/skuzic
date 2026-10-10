@@ -107,7 +107,6 @@
   color: var(--foreground);
   font: inherit;
   font-size: 0.875rem;
-  cursor: pointer;
 }
 .settings-select-trigger > span {
   overflow: hidden;
@@ -194,9 +193,9 @@
 .settings-link { font-size: 0.8125rem; text-decoration: underline; text-underline-offset: 0.2em; }
 .settings-footer { border-top: 1px solid var(--border); }
 .settings-footer .settings-hint { font-size: 0.75rem; }
-.settings-dialog [data-slot='button'] { min-height: 2.75rem; cursor: pointer; }
+.settings-dialog [data-slot='button'] { min-height: 2.75rem; }
 .settings-footer [data-slot='button'] { min-width: 5rem; }
-.settings-dialog [role='switch'] { position: relative; cursor: pointer; }
+.settings-dialog [role='switch'] { position: relative; }
 .settings-dialog [role='switch']::before { content: ''; position: absolute; inset: -0.625rem -0.125rem; }
 .settings-dialog :is(button, select, summary):focus-visible,
 .settings-segments input:focus-visible + span { outline: 2px solid var(--ring); outline-offset: 2px; }

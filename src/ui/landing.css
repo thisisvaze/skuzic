@@ -46,7 +46,6 @@
   height: 2.25rem;
   border-radius: 0.625rem;
   color: var(--color-ink-soft);
-  cursor: pointer;
 }
 
 .theme-switcher button[aria-pressed='true'] {

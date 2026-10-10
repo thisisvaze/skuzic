@@ -6,12 +6,13 @@ import {
   type LiveMusicSession,
 } from '@google/genai';
 import { CALM, inCalm, type MixConfig } from '../core/types';
-import { geminiAuth } from '../lib/relay';
+import { geminiAuth, relayPass } from '../lib/relay';
 import {
   CAPABILITIES,
   type EngineCapabilities,
   type EngineEvents,
   type EngineStatus,
+  type Lead,
   type MusicEngine,
   type PromptWeight,
 } from './engine';
@@ -61,6 +62,10 @@ export function toApiConfig(config: MixConfig): LiveMusicGenerationConfig {
   };
 }
 
+function sameTempoAndKey(a: LiveMusicGenerationConfig, b: LiveMusicGenerationConfig): boolean {
+  return a.bpm === b.bpm && a.scale === b.scale;
+}
+
 export class LyriaEngine implements MusicEngine {
   readonly capabilities: EngineCapabilities = CAPABILITIES.lyria;
 
@@ -80,10 +85,16 @@ export class LyriaEngine implements MusicEngine {
   /** What the band was last told, to tell a reopened session the same. */
   private lastConfig?: MixConfig;
   private lastPrompts?: PromptWeight[];
+  /**
+   * The tempo and key of the last chunk to arrive. Lyria tags every chunk with
+   * the config that made it, and a chunk already in flight at a reset is still
+   * the old tempo, so the tag is what says where the new one starts.
+   */
+  private heard?: LiveMusicGenerationConfig;
 
   /** An empty key plays through the hosted demo's relay (src/lib/relay.ts). */
   constructor(
-    apiKey: string,
+    private apiKey: string,
     private events: EngineEvents = {},
   ) {
     // Lyria RealTime is experimental and only exposed on the v1alpha surface.
@@ -111,6 +122,7 @@ export class LyriaEngine implements MusicEngine {
 
   /** Opens a session and waits for setupComplete; rejects if it closes first. */
   private async open(): Promise<LiveMusicSession> {
+    if (!this.apiKey) await relayPass();
     let markReady: () => void;
     this.ready = new Promise<void>((resolve, reject) => {
       markReady = resolve;
@@ -138,7 +150,10 @@ export class LyriaEngine implements MusicEngine {
           }
 
           for (const chunk of message.serverContent?.audioChunks ?? []) {
-            if (chunk.data) this.scheduler?.enqueue(chunk.data, chunk.mimeType);
+            const made = chunk.sourceMetadata?.musicGenerationConfig;
+            const swap = !!made && !!this.heard && !sameTempoAndKey(made, this.heard);
+            if (made) this.heard = made;
+            if (chunk.data) this.scheduler?.enqueue(chunk.data, chunk.mimeType, swap);
           }
           if (this.scheduler) this.events.onBuffer?.(this.scheduler.bufferedSeconds);
         },
@@ -261,12 +276,13 @@ export class LyriaEngine implements MusicEngine {
   }
 
   /**
-   * Required after a bpm or scale change. The model restarts and every queued
-   * buffer is dropped, so the gap is unavoidable — ducking around it makes it
-   * read as a swell rather than a glitch.
+   * Required after a bpm or scale change. The model restarts at once; what is
+   * already queued plays out and fades into the new music. A new tempo or key
+   * swaps on the chunk tagged with it, so only other resets guess.
    */
   resetContext(): void {
-    if (!this.scheduler) {
+    const tagged = this.lastConfig && this.heard && !sameTempoAndKey(toApiConfig(this.lastConfig), this.heard);
+    if (!this.scheduler || tagged) {
       this.session?.resetContext();
       return;
     }
@@ -276,6 +292,10 @@ export class LyriaEngine implements MusicEngine {
   setMasterVolume(volume: number): void {
     this.masterVolume = volume;
     this.scheduler?.setVolume(volume);
+  }
+
+  lead(lead: Lead): void {
+    this.scheduler?.lead(lead);
   }
 
   getLevels(bands: number): number[] | null {

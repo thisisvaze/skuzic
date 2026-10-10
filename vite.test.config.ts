@@ -1,6 +1,6 @@
 import { defineConfig } from 'vite';
 
-// Bundles the pure core (reducer + schema) so it can run under plain node.
+// Bundles the pure core (reducer + schema) and perception so they can run under plain node.
 export default defineConfig({
   build: {
     ssr: true,
@@ -8,9 +8,9 @@ export default defineConfig({
     minify: false,
     emptyOutDir: true,
     lib: {
-      entry: 'test/core.test.ts',
+      entry: { core: 'test/core.test.ts', perception: 'test/perception.test.ts' },
       formats: ['es'],
-      fileName: () => 'core.test.js',
     },
+    rollupOptions: { output: { entryFileNames: '[name].test.js' } },
   },
 });

@@ -31,25 +31,25 @@ the page leads, the music follows.
 
 Scale strictly with how much ink is actually on the canvas:
 
-  one line, one small mark        style, mood and one quiet lead, density at
+  one line, one small mark        mood and one quiet lead, density at
                                   or below 0.2
-  a recognisable subject          the same three, density ~0.3
+  a recognisable subject          the same two, density ~0.3
   a full, worked page             a second instrument, and only a full page gets it
 
 One mark gets one quiet lead. A single fingerpicked figure or one soft chord
 loop, alone in a room, is an invitation; a rhythm section behind someone's first
 line is an ambush.
 
-The style is the floor, and it enters solid, at 1.0 from the first mark.
-Listeners keep choosing a bass-led bed over a chord-led one: when the lead is a
-bass, let it carry (0.5-0.6) rather than whisper (0.4). Restraint means few
-layers, never a timid floor.
+The selected vibe shapes the playing without taking a layer of its own.
+When the lead is a bass, let it carry (0.5-0.6) rather than whisper (0.4).
+Restraint means few
+layers, with each one expressive.
 
 When you add anything else, add the *quietest* useful thing, not the most
 complete. Prefer MODIFY_TRACK to ADD_TRACK; prefer raising density a notch to
 either. Never emit more than one ADD_TRACK per reply. If the drawing loses
-weight (erased, simplified), take layers away just as readily, but never the
-style or the mood.
+weight (erased, simplified), take layers away just as readily, keeping the
+remaining playing within the selected vibe.
 
 Keep every lead small in its own words: "solo", "just", "sparse", "one hand",
 "far away". A lead that describes a section, a groove, or "the full band" has
@@ -104,8 +104,8 @@ happened to be playing a moment ago.
 Read the whole image, name its vibe, then emit exactly this shape:
 
   CLEAR_TRACKS
-  ADD_TRACK  (style, mood and a lead, plus a second instrument only if the
-              page has a second subject, together describing that vibe)
+  ADD_TRACK  (mood and a lead, plus a second instrument only if the
+              page has a second subject, played within the SELECTED VIBE)
 
 Always this shape, every time — even when the drawing has barely changed. If
 the vibe really is the same, your prompts will come out nearly the same and the
@@ -118,13 +118,12 @@ than as a cut. Describe the destination and let the transition take care of
 itself.
 
 Rebuilding from scratch is not licence to rebuild big. A single mark still gets
-the three-layer floor and nothing more. Build the layers in order: the style
-that establishes the world, the mood, the lead for the drawing's main
-character, and a second instrument last.
+two layers and nothing more. Build the layers in order: the mood, the lead for
+the drawing's main character, and a second instrument last.
 
 Rebuilding is also not licence to change bands. The idiom you are rebuilding in
-is the idiom of the style layer you are clearing. Read it off before you clear,
-and put the new mix back inside it. A session that changes genre every
+comes from SELECTED VIBE, which survives clearing. Put the new mix inside it,
+without adding a style channel. A session that changes genre every
 time the drawing changes is the worst thing this strategy can do.`,
 };
 
@@ -166,8 +165,8 @@ motion:
   bad:  "ocean"                                          (no character)
 
 Mix continuous and intermittent. A scene made only of beds is lifeless; one made
-only of hits is chaos. Read the role table below in sound-design terms: STYLE
-is the room's low rumble, MOOD how the place feels, VOICE the one sound the
+only of hits is chaos. Read the role table below in sound-design terms:
+MOOD is the room's atmosphere, VOICE the one sound the
 scene is *about*, BODY the thing that intermittently happens. One role per layer
 holds exactly as written: two overlapping room tones blur into each other the
 same way two pads do.

@@ -206,7 +206,7 @@ Keep the landing short and fun (the user, 2026-10-07): one playable scene, one s
 The logo is a bold scribble running into three round-ended bars, short, tall, medium, filled with the web app’s orange–pink–violet gradient (user, 2026-10-07: thicker, clean, never rough or hand-drawn). Use it on every branded surface. The gradient belongs to the mark; the word “skuzic” stays in the surrounding ink color.
 
 - Web: `src/components/SkuzicLogo.tsx` owns the mark and wordmark for both the landing and studio headers. Compact mode hides only the name on phones and retains the accessible name.
-- Canonical artwork: `public/brand/skuzic-mark.svg`, pure vector: the scribble is one path and the bars are rounded rectangles, all in the brand gradient, centred in a 1024 square so the app icon is the same art. There are no external image references or page-level SVG IDs. `docs/brand/skuzic-mark-bold.svg` is the same art laid out for Figma, with named layers.
+- Canonical artwork: `public/brand/skuzic-mark.svg`, pure vector from the Figma export: the scribble and each bar are one path, each with its own stretch of the brand gradient, centred in a 1024 square so the app icon is the same art. There are no external image references or page-level SVG IDs. `docs/brand/skuzic-mark-bold.svg` is the Figma export itself.
 - Browser icon: the same canonical SVG; `public/favicon.svg` remains a generated alias for previously cached URLs.
 - iPad: `Wordmark` uses the generated `SkuzicMark` asset, and AppIcon uses the same gradient mark on warm paper. The web home-screen icon uses the same composition.
 - Exports: run `pnpm brand:export` after updating the SVG. The exporter produces transparent inline artwork and opaque RGB app/home-screen icons.

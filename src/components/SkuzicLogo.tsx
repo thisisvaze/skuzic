@@ -17,16 +17,16 @@ export function SkuzicLogo({
     >
       <img
         src="/brand/skuzic-mark.svg"
-        width="33"
+        width="38"
         height="28"
         alt=""
         aria-hidden="true"
         draggable={false}
-        className="h-7 w-[2.085rem] shrink-0"
+        className="h-7 w-[2.377rem] shrink-0"
       />
       <span
         aria-hidden="true"
-        className={cn('font-display text-[1.25rem] leading-none font-bold tracking-[-0.035em]', compact && 'hidden sm:inline')}
+        className={cn('font-display text-[1.25rem] leading-none font-bold tracking-[0.01em]', compact && 'hidden sm:inline')}
       >
         skuzic
       </span>

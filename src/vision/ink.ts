@@ -1,7 +1,8 @@
 /**
  * How the page looks, apart from what is drawn on it: how much ink is down and
- * how warm its colours are. The eyes decide what the band plays; this decides
- * how busy and how bright it plays it, so the music grows as the page fills.
+ * how warm its colours are. The eyes decide what the music plays; colour and
+ * the hand decide how bright and how busy. Never how full the page is: that
+ * only grows, and the music grew with it into clutter.
  */
 export interface Ink {
   /** Share of the page with ink on it, 0..1. */
@@ -50,15 +51,31 @@ export async function inkOf(url: string): Promise<Ink> {
   return { coverage: ink / (data.length / 4), warmth: chroma ? warm / chroma : 0 };
 }
 
-/** The two knobs Lyria steers live, from the page: a fuller page plays busier, warm colours brighter. */
+/** The two knobs Lyria steers live, from the page: warm colours play brighter, cool ones darker. */
 export function inkConfig(
   base: { density: number; brightness: number },
   ink: Ink,
 ): { density: number; brightness: number } {
-  // Most sketches cover well under a third of the page; past that it is full.
-  const fill = Math.sqrt(Math.min(1, ink.coverage / 0.3));
   return {
-    density: round2(clamp(base.density - 0.1 + 0.3 * fill, 0.15, 0.85)),
+    density: base.density,
     brightness: round2(clamp(base.brightness + 0.15 * ink.warmth, 0.15, 0.9)),
   };
 }
+
+/**
+ * The hand's swell, 0..1: it climbs while the pen is on the paper and ebbs
+ * while it rests, so the music rises and falls with the drawing like a wave.
+ * Lyria is heard 3.5 to 5 s after a change, so these are seconds, not ms.
+ */
+const RISE = 3000;
+const FALL = 6000;
+export const swellAfter = (swell: number, drawing: boolean, ms: number) => {
+  const to = drawing ? 1 : 0;
+  return to + (swell - to) * Math.exp(-ms / (drawing ? RISE : FALL));
+};
+
+/** The page's own density, a little under it at rest and over it mid-stroke. */
+export const withSwell = (knobs: { density: number; brightness: number }, swell: number) => ({
+  ...knobs,
+  density: round2(clamp(knobs.density - 0.1 + 0.25 * swell, 0.15, 0.85)),
+});

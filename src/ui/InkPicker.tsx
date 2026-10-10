@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Button,
   ColorArea,
@@ -18,6 +18,7 @@ import {
   type Color,
 } from 'react-aria-components';
 import { cn } from '@/lib/utils';
+import { ShortcutTooltip } from '@/components/ui/shortcut-tooltip';
 
 /** The thumb's white ring, readable over any colour. */
 const THUMB =
@@ -37,13 +38,31 @@ export function InkPicker({
   value,
   presets,
   onChange,
+  isOpen,
+  onOpenChange,
 }: {
   /** #rrggbb */
   value: string;
   presets: string[];
   onChange: (hex: string) => void;
+  isOpen?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
   const [color, setColor] = useState<Color>(() => parseColor(value).toFormat('hsb'));
+  const popover = useRef<HTMLElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  // Non-modal so the paper stays drawable, which also means pressing outside
+  // doesn't close it. Any press outside does here (a stroke, another tool, the
+  // mixer), without stopping that press from doing its own thing.
+  useEffect(() => {
+    if (!isOpen) return;
+    const close = (e: PointerEvent) => {
+      const target = e.target as Node;
+      if (!popover.current?.contains(target) && !trigger.current?.contains(target)) onOpenChange?.(false);
+    };
+    document.addEventListener('pointerdown', close, true);
+    return () => document.removeEventListener('pointerdown', close, true);
+  }, [isOpen, onOpenChange]);
   useEffect(() => {
     if (color.toString('hex').toLowerCase() !== value.toLowerCase()) setColor(parseColor(value).toFormat('hsb'));
     // Only an outside change of ink should reset the picker.
@@ -58,16 +77,25 @@ export function InkPicker({
         onChange(next.toString('hex').toLowerCase());
       }}
     >
-      <DialogTrigger>
-        <Button
-          aria-label="Ink colour"
-          className="grid size-9 place-items-center rounded-full outline-none transition-colors hover:bg-secondary data-[focus-visible]:ring-2 data-[focus-visible]:ring-ring/60"
-        >
-          <ColorSwatch className="size-[22px] rounded-full shadow-[inset_0_0_0_1px_rgb(0_0_0/0.12)] dark:shadow-[inset_0_0_0_1px_rgb(255_255_255/0.25)]" />
-        </Button>
+      <DialogTrigger isOpen={isOpen} onOpenChange={onOpenChange}>
+        <ShortcutTooltip label="Ink colour" shortcut="C">
+          <Button
+            ref={trigger}
+            aria-label="Ink colour"
+            aria-keyshortcuts="C"
+            aria-description="Choose an ink colour. Shortcut: C."
+            className="grid size-9 place-items-center rounded-full outline-none transition-colors hover:bg-secondary data-[focus-visible]:ring-2 data-[focus-visible]:ring-ring/60"
+          >
+            <ColorSwatch className="size-[22px] rounded-full shadow-[inset_0_0_0_1px_rgb(0_0_0/0.12)] dark:shadow-[inset_0_0_0_1px_rgb(255_255_255/0.25)]" />
+          </Button>
+        </ShortcutTooltip>
         <Popover
+          ref={popover}
           // A drawing palette must not put an input-blocking underlay over the canvas.
           isNonModal
+          // Focus leaving for its own swatch isn't leaving: the swatch's press toggles it shut,
+          // where closing on the blur first would have it reopen on the same press.
+          shouldCloseOnInteractOutside={(element) => !trigger.current?.contains(element)}
           placement="right"
           offset={12}
           className={cn(
