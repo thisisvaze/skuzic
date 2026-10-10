@@ -180,16 +180,20 @@ function Start({
   returning,
   demo,
 }: {
-  onStart: () => void;
+  onStart?: () => void;
   returning: boolean;
   demo: boolean;
 }) {
   return (
     <div className="experiment-start">
-      <WatercolorButton onClick={onStart}>
-        {returning ? 'Back to studio' : 'Open studio'}
-      </WatercolorButton>
-      {!returning && (
+      {onStart ? (
+        <WatercolorButton onClick={onStart}>
+          {returning ? 'Back to studio' : 'Open studio'}
+        </WatercolorButton>
+      ) : (
+        <p className="experiment-note">The studio opens on a desktop or laptop.</p>
+      )}
+      {onStart && !returning && (
         <p className="experiment-note">
           {demo ? 'Free to play. No sign-up.' : "Connect a free Gemini key to begin. It stays in your browser."}
         </p>
@@ -286,7 +290,7 @@ function Header({ touchDrawing, onToggleDrawing, theme, onThemeChange }: {
 }
 
 function Hero({ onStart, returning, demo, touchDrawing }: {
-  onStart: () => void;
+  onStart?: () => void;
   returning: boolean;
   demo: boolean;
   touchDrawing: boolean;
@@ -505,8 +509,8 @@ export function Landing({
   theme,
   onThemeChange,
 }: {
-  /** Asks for a key first if there isn't one yet. */
-  onStart: () => void;
+  /** Asks for a key first if there isn't one yet. Absent on phones and tablets, which get no studio. */
+  onStart?: () => void;
   /** The shared demo key plays, so nobody needs one of their own. */
   demo: boolean;
   /** A session is already open behind this page. */
