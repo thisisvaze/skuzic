@@ -118,8 +118,16 @@ const REFINE_BACKOFF = 20_000;
 /** Wide enough for the mixer to sit beside the paper instead of over it (Tailwind's lg). */
 const wide = () => window.matchMedia('(min-width: 1024px)').matches;
 
+/**
+ * The studio needs a mouse or trackpad. ponytail: phones still hang in it (an
+ * Android Pixel froze whole on 2026-10-10 even with SigLIP in a worker), so
+ * they only get the landing until that is found and fixed.
+ */
+const desktop = () => window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+
 /** The landing lives at /, the studio at /app. */
-const viewAt = (path: string): 'landing' | 'studio' => (/^\/app(\/|$)/.test(path) ? 'studio' : 'landing');
+const viewAt = (path: string): 'landing' | 'studio' =>
+  desktop() && /^\/app(\/|$)/.test(path) ? 'studio' : 'landing';
 
 /** One arm of a pending A/B choice, with its resulting mix precomputed. */
 interface AbVariantPlan {
@@ -1785,7 +1793,7 @@ export default function App() {
 
       {view === 'landing' && (
         <Landing
-          onStart={enterStudio}
+          onStart={desktop() ? enterStudio : undefined}
           demo={demo}
           returning={connected}
           theme={theme}
