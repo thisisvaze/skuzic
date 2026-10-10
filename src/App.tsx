@@ -118,12 +118,8 @@ const REFINE_BACKOFF = 20_000;
 /** Wide enough for the mixer to sit beside the paper instead of over it (Tailwind's lg). */
 const wide = () => window.matchMedia('(min-width: 1024px)').matches;
 
-/** The studio needs a mouse or trackpad; phones and tablets only get the landing. */
-const desktop = () => window.matchMedia('(hover: hover) and (pointer: fine)').matches;
-
 /** The landing lives at /, the studio at /app. */
-const viewAt = (path: string): 'landing' | 'studio' =>
-  desktop() && /^\/app(\/|$)/.test(path) ? 'studio' : 'landing';
+const viewAt = (path: string): 'landing' | 'studio' => (/^\/app(\/|$)/.test(path) ? 'studio' : 'landing');
 
 /** One arm of a pending A/B choice, with its resulting mix precomputed. */
 interface AbVariantPlan {
@@ -184,6 +180,8 @@ export default function App() {
     if (wide()) save(KEYS.mixerOpen, open);
   };
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [penSound, setPenSound] = useState(() => load(KEYS.brushSound, true));
+  useEffect(() => save(KEYS.brushSound, penSound), [penSound]);
   /** The style the session plays in and the instruments a drawing may bring in. */
   const [vibe, setVibe] = useState<Vibe>(() => vibeById(load(KEYS.vibe, DEFAULT_VIBE.id)));
   // Read inside readDrawing, a stable callback; set by hand on pick so a read
@@ -1638,6 +1636,7 @@ export default function App() {
             <DrawCanvas
               ref={canvasRef}
               onLead={lead}
+              sound={penSound}
               onInput={(input) => {
                 if (input.type === 'down' || input.type === 'up') {
                   swellNow();
@@ -1680,6 +1679,8 @@ export default function App() {
           <Mixer
             open={mixerOpen}
             onClose={() => showMixer(false)}
+            penSound={penSound}
+            onPenSound={setPenSound}
             status={playbackNotice}
             activity={audible && <Equalizer animated getLevels={getLevels} />}
             player={playButton}
@@ -1784,7 +1785,7 @@ export default function App() {
 
       {view === 'landing' && (
         <Landing
-          onStart={desktop() ? enterStudio : undefined}
+          onStart={enterStudio}
           demo={demo}
           returning={connected}
           theme={theme}

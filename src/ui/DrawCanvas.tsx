@@ -319,6 +319,8 @@ interface Props {
   onLead?: (lead: Lead) => void;
   /** Every input as it lands on the page, played back ones included. */
   onInput?: (input: PageInput) => void;
+  /** The pen's own sounds; off still lets the hand lead the music. */
+  sound?: boolean;
 }
 
 /**
@@ -339,6 +341,7 @@ export const DrawCanvas = forwardRef<CanvasHandle, Props>(function DrawCanvas(
     startTitle,
     onLead,
     onInput,
+    sound = true,
   },
   ref,
 ) {
@@ -385,6 +388,8 @@ export const DrawCanvas = forwardRef<CanvasHandle, Props>(function DrawCanvas(
     },
     [],
   );
+
+  useEffect(() => touch.current?.mute(!sound), [sound]);
 
   const past = useRef<Entry[]>([]);
   const future = useRef<Entry[]>([]);
@@ -859,6 +864,7 @@ export const DrawCanvas = forwardRef<CanvasHandle, Props>(function DrawCanvas(
         return bands?.length ? bands.reduce((a, b) => a + b, 0) / bands.length : 0;
       });
       touch.current.direct((lead) => leadRef.current?.(lead));
+      touch.current.mute(!sound);
     }
     const { width, height } = e.currentTarget.getBoundingClientRect();
     const tool = erasing

@@ -148,6 +148,7 @@ function paper(ctx: BaseAudioContext, roughness: number): AudioBuffer {
 
 export class TouchEngine {
   private ctx = new AudioContext();
+  private out: GainNode;
   private paperBuffers: Record<'rough' | 'smooth', AudioBuffer>;
   private paperLowpass: BiquadFilterNode;
   private paperLevel: GainNode;
@@ -177,7 +178,7 @@ export class TouchEngine {
 
   constructor() {
     const ctx = this.ctx;
-    const out = new GainNode(ctx, { gain: LEVEL });
+    const out = (this.out = new GainNode(ctx, { gain: LEVEL }));
     out.connect(ctx.destination);
 
     this.paperBuffers = { rough: paper(ctx, 0.85), smooth: paper(ctx, 0.35) };
@@ -319,6 +320,11 @@ export class TouchEngine {
     source.connect(band).connect(amp).connect(this.paperPan);
     source.start(now, Math.random() * 3);
     source.stop(now + 0.9);
+  }
+
+  /** Off silences the paper, tick and swish; the hand still leads the music. */
+  mute(off: boolean): void {
+    this.out.gain.value = off ? 0 : LEVEL;
   }
 
   close(): void {

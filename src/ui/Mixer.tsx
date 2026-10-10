@@ -2,7 +2,7 @@ import { useId, useRef, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { Scale } from '@google/genai';
 import NumberFlow, { type Format } from '@number-flow/react';
-import { ArrowUp, ChevronDown, Drum, Guitar, Lock, LockOpen, Sparkles, X } from 'lucide-react';
+import { ArrowUp, ChevronDown, Drum, Guitar, Lock, LockOpen, Sparkles, Volume2, VolumeOff, X } from 'lucide-react';
 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Slider } from '@/components/ui/slider';
@@ -35,6 +35,9 @@ const SCALE_LABELS: Record<string, string> = {
 interface Props {
   open: boolean;
   onClose: () => void;
+  /** The pen's own sounds, paper and tick. */
+  penSound: boolean;
+  onPenSound: (on: boolean) => void;
   /** Connection progress or an error; ordinary playback needs no status text. */
   status: ReactNode;
   /** The neutral audio meter beside the vibe name, only while audible. */
@@ -375,6 +378,8 @@ function Advanced({
 export function Mixer({
   open,
   onClose,
+  penSound,
+  onPenSound,
   status,
   activity,
   player,
@@ -421,6 +426,16 @@ export function Mixer({
             ))}
           </div>
           <div className="flex-1" />
+          <button
+            type="button"
+            aria-label="Pen sounds"
+            aria-pressed={penSound}
+            title={penSound ? 'Pen sounds on' : 'Pen sounds off'}
+            onClick={() => onPenSound(!penSound)}
+            className="grid size-8 place-items-center rounded-full text-muted-foreground outline-none hover:bg-secondary hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
+          >
+            {penSound ? <Volume2 className="size-4" /> : <VolumeOff className="size-4" />}
+          </button>
           <button
             type="button"
             aria-label="Hide the mixer"
